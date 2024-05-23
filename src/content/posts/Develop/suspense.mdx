@@ -1,0 +1,424 @@
+---
+title: Suspense 설명회
+description: 선언적인 로딩 상태 처리를 위해서
+date: "2024-02-05"
+keywords: [서스펜스, 로딩, suspense, loading]
+---
+
+# Suspense
+
+react 공식문서 Suspense 사용 예시
+
+```jsx
+<Suspense fallback={<Loading />}>
+  <SomeComponent />
+</Suspense>
+```
+
+---
+
+## Suspense는 무슨 역할인가요?
+
+Suspense는 자식 요소가 로드되기 전까지 로딩(fallback) UI를 보여줍니다.
+lazy loading, data fetching이 해당됩니다.
+
+---
+
+## Suspense는 어떻게 작동할까요?
+
+<br/>
+
+### Suspense는 throw된 Promise를 포착합니다.
+
+즉, 일반적인 axios 함수를 호출하거나 useQuery를 호출하면 Suspense는 동작하지 않습니다. Promise를 throw하는 과정이 필요합니다.
+
+아래는 리액트 팀에서 공개한 wrapPromise라는 함수입니다.
+
+```jsx
+function wrapPromise(promise) {
+  let status = "pending";
+  let response;
+
+  const suspender = promise.then(
+    (res) => {
+      status = "success";
+      response = res;
+    },
+    (err) => {
+      status = "error";
+      response = err;
+    }
+  );
+
+  const read = () => {
+    switch (status) {
+      case "pending":
+        throw suspender;
+      case "error":
+        throw response;
+      default:
+        return response;
+    }
+  };
+
+  return { read };
+}
+
+export default wrapPromise;
+```
+
+만약 promise가 pending 상태라면 promise를 throw하는 것을 볼 수 있습니다.
+
+이처럼 promise를 throw해주는 로직이 들어가야 suspense가 제대로 동작할 수 있습니다.
+https://github.com/pmndrs/suspend-react 라는 패키지를 사용하면 편하게 throw할 수 있습니다.
+
+다만, react-query에는 이미 이 기능이 구현되어 있습니다. v4 기준 `suspense` 옵션, v5 기준 `useSuspense~` hooks를 사용하면 됩니다.
+
+### Suspense는 어떻게 fallback UI와 Children을 구분해서 보여줄 수 있을까요?
+
+Reconciler가 렌더링하는 과정에서 `SuspenseComponent`를 만날 경우, `updateSuspenseComponent`를 호출합니다. 
+
+```jsx
+function updateSuspenseComponent(current, workInProgress, renderLanes) {
+  const nextProps = workInProgress.pendingProps;
+
+  let showFallback = false;
+  const didSuspend = (workInProgress.flags & DidCapture) !== NoFlags;
+  if (
+    didSuspend ||
+    shouldRemainOnFallback(current, workInProgress, renderLanes)
+  ) {
+    showFallback = true;
+    workInProgress.flags &= ~DidCapture;
+  }
+....
+```
+
+내부의 `didSuspend`는 로딩중인지를 기록하는 변수입니다.
+
+`shouldRemainOnFallback`는 Concurrent mode를 지원하기 위한 함수로, fallback UI를 유지해야하는 상황에서 `true`로 설정됩니다.
+
+로딩중이거나, fallback UI를 유지해야하는 경우 `showFallback`이 `true`로 설정됩니다. 
+
+```jsx
+if (current === null) {
+    // Initial mount
+    const nextPrimaryChildren = nextProps.children;
+    const nextFallbackChildren = nextProps.fallback;
+
+    if (showFallback) {
+      pushFallbackTreeSuspenseHandler(workInProgress);
+
+      const fallbackFragment = mountSuspenseFallbackChildren(
+        workInProgress,
+        nextPrimaryChildren,
+        nextFallbackChildren,
+        renderLanes,
+      );
+      
+      const primaryChildFragment: Fiber = (workInProgress.child: any);
+      primaryChildFragment.memoizedState = mountSuspenseOffscreenState(
+        renderLanes,
+      );
+      
+      workInProgress.memoizedState = SUSPENDED_MARKER;
+      return fallbackFragment;
+    } else {
+      pushPrimaryTreeSuspenseHandler(workInProgress);
+      return mountSuspensePrimaryChildren(
+        workInProgress,
+        nextPrimaryChildren,
+        renderLanes,
+      );
+    }
+  }
+```
+
+만약 `showFallback`이 `true`라면, `mountSuspenseFallbackChildren`을 호출합니다.
+
+- `mountSuspensePrimaryChildren` 은 이렇게 동작합니다.
+    
+    ```jsx
+    function mountSuspenseFallbackChildren(
+      workInProgress: Fiber,
+      primaryChildren: $FlowFixMe,
+      fallbackChildren: $FlowFixMe,
+      renderLanes: Lanes,
+    ) {
+      const mode = workInProgress.mode;
+      const progressedPrimaryFragment: Fiber | null = workInProgress.child;
+    
+      const primaryChildProps: OffscreenProps = {
+        mode: 'hidden',
+        children: primaryChildren,
+      };
+    
+      let primaryChildFragment;
+      let fallbackChildFragment;
+      if (
+        (mode & ConcurrentMode) === NoMode &&
+        progressedPrimaryFragment !== null
+      ) {
+        primaryChildFragment = progressedPrimaryFragment;
+        primaryChildFragment.childLanes = NoLanes;
+        primaryChildFragment.pendingProps = primaryChildProps;
+    
+        if (enableProfilerTimer && workInProgress.mode & ProfileMode) {
+          primaryChildFragment.actualDuration = 0;
+          primaryChildFragment.actualStartTime = -1;
+          primaryChildFragment.selfBaseDuration = 0;
+          primaryChildFragment.treeBaseDuration = 0;
+        }
+    
+        fallbackChildFragment = createFiberFromFragment(
+          fallbackChildren,
+          mode,
+          renderLanes,
+          null,
+        );
+      } else {
+        primaryChildFragment = mountWorkInProgressOffscreenFiber(
+          primaryChildProps,
+          mode,
+          NoLanes,
+        );
+        fallbackChildFragment = createFiberFromFragment(
+          fallbackChildren,
+          mode,
+          renderLanes,
+          null,
+        );
+      }
+    
+      primaryChildFragment.return = workInProgress;
+      fallbackChildFragment.return = workInProgress;
+      primaryChildFragment.sibling = fallbackChildFragment;
+      workInProgress.child = primaryChildFragment;
+      return fallbackChildFragment;
+    }
+    ```
+    
+    현재 모드가 `ConcurrentMode`가 아니고 `progressedPrimaryFragment`(기존 작업)가 존재하면 `fallbackChildFragment`를 렌더링하고,
+    `ConcurrentMode`이거나 기존 작업이 없다면 `mountWorkInProgressOffscreenFiber`를 호출하여 `fallbackChildFragment`와 `primaryChildFragment`을 모두 렌더링합니다.
+    
+    단, `mountWorkInProgressOffscreenFiber`에서 렌더링되는 Children은 `primaryChildProps`에서 정의된 대로 `hidden` 즉, **화면에 나타나지 않고 백그라운드에서 렌더링(DOM에 미반영)**됩니다.
+    
+
+렌더링할 준비가 되었다면, `showFallback`이 false로 설정되고 `mountSuspensePrimaryChildren`를 호출합니다.
+
+- `mountSuspensePrimaryChildren` 은 이렇게 동작합니다.
+    
+    ```tsx
+    function mountSuspensePrimaryChildren(
+      workInProgress: Fiber,
+      primaryChildren: $FlowFixMe,
+      renderLanes: Lanes,
+    ) {
+      const mode = workInProgress.mode;
+      const primaryChildProps: OffscreenProps = {
+        mode: 'visible',
+        children: primaryChildren,
+      };
+      const primaryChildFragment = mountWorkInProgressOffscreenFiber(
+        primaryChildProps,
+        mode,
+        renderLanes,
+      );
+      primaryChildFragment.return = workInProgress;
+      workInProgress.child = primaryChildFragment;
+      return primaryChildFragment;
+    }
+    ```
+    
+    `mountWorkInProgressOffscreenFiber`를 호출하여 `primaryChildFragment`를 렌더링합니다.
+    
+    단, 이번에는 `mode`가 `visible`, 즉, DOM에 포함되어 화면에 보여집니다.
+    
+
+### Suspense는 어떻게 showFallback을 결정할까요?
+
+아래는 `renderRootConcurrent`함수의 일부분입니다. 엄청 길지만… `workLoopConcurrent`라는 함수를 `try catch`와 `do while`로 감싸놓은 것을 확인할 수 있습니다.
+
+```tsx
+outer: do {
+    try {
+      if (
+        workInProgressSuspendedReason !== NotSuspended &&
+        workInProgress !== null
+      ) {
+        const unitOfWork = workInProgress;
+        const thrownValue = workInProgressThrownValue;
+        resumeOrUnwind: switch (workInProgressSuspendedReason) {
+          case SuspendedOnError: {
+            workInProgressSuspendedReason = NotSuspended;
+            workInProgressThrownValue = null;
+            throwAndUnwindWorkLoop(root, unitOfWork, thrownValue);
+            break;
+          }
+          case SuspendedOnData: {
+            const thenable: Thenable<mixed> = (thrownValue: any);
+            if (isThenableResolved(thenable)) {
+              workInProgressSuspendedReason = NotSuspended;
+              workInProgressThrownValue = null;
+              replaySuspendedUnitOfWork(unitOfWork);
+              break;
+            }
+
+            const onResolution = () => {
+              if (
+                workInProgressSuspendedReason === SuspendedOnData &&
+                workInProgressRoot === root
+              ) {
+                workInProgressSuspendedReason = SuspendedAndReadyToContinue;
+              }
+
+              ensureRootIsScheduled(root);
+            };
+            thenable.then(onResolution, onResolution);
+            break outer;
+          }
+          case SuspendedOnImmediate: {
+            workInProgressSuspendedReason = SuspendedAndReadyToContinue;
+            break outer;
+          }
+          case SuspendedOnInstance: {
+            workInProgressSuspendedReason =
+              SuspendedOnInstanceAndReadyToContinue;
+            break outer;
+          }
+          case SuspendedAndReadyToContinue: {
+            const thenable: Thenable<mixed> = (thrownValue: any);
+            if (isThenableResolved(thenable)) {
+              // The data resolved. Try rendering the component again.
+              workInProgressSuspendedReason = NotSuspended;
+              workInProgressThrownValue = null;
+              replaySuspendedUnitOfWork(unitOfWork);
+            } else {
+              // Otherwise, unwind then continue with the normal work loop.
+              workInProgressSuspendedReason = NotSuspended;
+              workInProgressThrownValue = null;
+              throwAndUnwindWorkLoop(root, unitOfWork, thrownValue);
+            }
+            break;
+          }
+          case SuspendedOnInstanceAndReadyToContinue: {
+            switch (workInProgress.tag) {
+              case HostComponent:
+              case HostHoistable:
+              case HostSingleton: {
+                const hostFiber = workInProgress;
+                const type = hostFiber.type;
+                const props = hostFiber.pendingProps;
+                const isReady = preloadInstance(type, props);
+                if (isReady) {
+                  workInProgressSuspendedReason = NotSuspended;
+                  workInProgressThrownValue = null;
+                  const sibling = hostFiber.sibling;
+                  if (sibling !== null) {
+                    workInProgress = sibling;
+                  } else {
+                    const returnFiber = hostFiber.return;
+                    if (returnFiber !== null) {
+                      workInProgress = returnFiber;
+                      completeUnitOfWork(returnFiber);
+                    } else {
+                      workInProgress = null;
+                    }
+                  }
+                  break resumeOrUnwind;
+                }
+                break;
+              }
+              default: {
+                break;
+              }
+            }
+            workInProgressSuspendedReason = NotSuspended;
+            workInProgressThrownValue = null;
+            throwAndUnwindWorkLoop(root, unitOfWork, thrownValue);
+            break;
+          }
+          case SuspendedOnDeprecatedThrowPromise: {
+            workInProgressSuspendedReason = NotSuspended;
+            workInProgressThrownValue = null;
+            throwAndUnwindWorkLoop(root, unitOfWork, thrownValue);
+            break;
+          }
+          case SuspendedOnHydration: {
+            resetWorkInProgressStack();
+            workInProgressRootExitStatus = RootDidNotComplete;
+            break outer;
+          }
+          default: {
+            throw new Error(
+              'Unexpected SuspendedReason. This is a bug in React.',
+            );
+          }
+        }
+      }
+
+      workLoopConcurrent();
+      break;
+    } catch (thrownValue) {
+      handleThrow(root, thrownValue);
+    }
+  } while (true);
+```
+
+`workLoopConcurrent`는 Fiber를 돌면서 `beginWork` 즉, 렌더링을 담당합니다. 여기서 `workInProgressSuspendedReason`이 `SuspendedOnData`일 경우(비동기 작업이 진행중일 경우), `thenable.then(onResolution, onResolution)`을 등록하고 루프를 빠져나옵니다.
+이러한 방식으로 비동기 작업이 완료되는 것을 기다리면서 무한 루프에 빠지지 않고 다른 작업을 수행할 수 있습니다.
+
+`handleThrow`는 `beginWork`를 수행하는 중에 throw된 `error`나 `promise`를 포착하고, 이것이 `SuspenseException`인지 확인합니다.
+
+`SuspenseException`이라면, `thrownValue`를 `thenable`로 만들고 `workInProgressSuspendedReason`를 `SuspendedOnData`로 만들어 위의 `do while`에서 조건에 잡히도록 만들어줍니다.
+
+```tsx
+function handleThrow(root: FiberRoot, thrownValue: any): void {
+  resetHooksAfterThrow();
+  resetCurrentDebugFiberInDEV();
+  ReactCurrentOwner.current = null;
+
+  if (thrownValue === SuspenseException) {
+    thrownValue = getSuspendedThenable();
+    workInProgressSuspendedReason =
+      shouldRemainOnPreviousScreen() &&
+      !includesNonIdleWork(workInProgressRootSkippedLanes) &&
+      !includesNonIdleWork(workInProgressRootInterleavedUpdatedLanes)
+        ? SuspendedOnData
+        : SuspendedOnImmediate;
+  } else if (thrownValue === SuspenseyCommitException) {
+    thrownValue = getSuspendedThenable();
+    workInProgressSuspendedReason = SuspendedOnInstance;
+  } else if (thrownValue === SelectiveHydrationException) {
+    workInProgressSuspendedReason = SuspendedOnHydration;
+  } else {
+    const isWakeable =
+      thrownValue !== null &&
+      typeof thrownValue === 'object' &&
+      typeof thrownValue.then === 'function';
+
+    workInProgressSuspendedReason = isWakeable
+      ? SuspendedOnDeprecatedThrowPromise
+      : SuspendedOnError;
+  }
+
+  workInProgressThrownValue = thrownValue;
+
+...
+```
+
+---
+
+## ErrorBoundary와 비슷한가요?
+
+대수적 효과, 제어의 역전 등으로 불리우는 개념을 적용했다는 점에서 유사하다고 할 수 있을 것 같습니다. 즉, 특정 상태를 처리하는 로직을 외부에 위임합니다.
+
+따라서 사용했을 경우에 장점도 유사합니다. 선언적으로 로딩 처리를 할 수 있으며, 일관된 코드 작성이 가능합니다. 그리고 **`Suspense`는 data fetching이 성공했음을 보장**합니다. 따라서 `Children`에서 사용하는 `data`는 항상 존재합니다(이는 react query v5에서 `useSuspense~` hooks로 구현되었습니다.)
+
+다만, `ErrorBoundary`는 Class Component의 라이프사이클 메서드인 **`getDerivedStateFromError`를 사용하여 에러를 포착**했다면 `Suspense`는 **리액트의 렌더링 엔진에서 promise를 포착**한다는 차이가 있습니다.
+
+## 참고
+
+`useMutation`에는 `Suspense`가 적용되지 않습니다.
+
+tkdodo의 코멘트에 따르면(벌써 몇년 전이긴 하지만…) **아무도 구현한 사람이 없어서 구현되지 않았다**고 합니다.

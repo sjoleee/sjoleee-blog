@@ -12,5 +12,6 @@ export const USER_INFORMATIONS = {
 };
 
 export const CATEGORY_ICONS: Record<string, string> = {
+  Develop: "🧑🏻‍💻",
   All: "🏠",
 };
