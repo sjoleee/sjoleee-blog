@@ -7,13 +7,12 @@ const Comments = () => {
   const { theme } = useTheme();
 
   return (
-    // https://giscus.app/ko 를 확인해 주세요
     <Giscus
-      repo="수정해/주세요"
-      repoId="수정해주세요"
-      category="수정해주세요"
-      categoryId="수정해주세요"
       id="comments"
+      repo="sjoleee/sjoleee-blog-comment"
+      repoId="R_kgDOLeLoLg"
+      category="Comment"
+      categoryId="DIC_kwDOLeLoLs4Cd3HF"
       mapping="pathname"
       reactionsEnabled="1"
       emitMetadata="0"
