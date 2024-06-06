@@ -3,7 +3,6 @@
 import "@sjoleee/react-cmdk/dist/cmdk.css";
 
 import { useState } from "react";
-
 import { allPosts } from "contentlayer/generated";
 import CommandPalette, {
   filterItems,
