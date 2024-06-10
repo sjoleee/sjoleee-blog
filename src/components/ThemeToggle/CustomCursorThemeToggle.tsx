@@ -36,9 +36,9 @@ const CustomCursorThemeToggle = ({
   const handleMouseMove = (e: MouseEvent<HTMLButtonElement>) => {
     if (rect) {
       const scrollX = window.scrollX;
-      const scrollY = window.scrollY;
+
       x.set(e.clientX - rect.left + scrollX);
-      y.set(e.clientY - rect.top + scrollY + 20);
+      y.set(e.clientY - rect.top + 20);
     }
   };
   const handleMouseLeave = () => {
