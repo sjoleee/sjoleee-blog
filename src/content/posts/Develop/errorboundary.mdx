@@ -58,14 +58,16 @@ class ErrorBoundary extends React.Component {
 
 ## ErrorBoundary는 다음과 같은 에러는 포착하지 못합니다.
 
-- 이벤트 핸들러에서 발생한 에러
-- 비동기 작업에서 발생한 에러
-- 서버사이드에서 발생한 에러
-- ErrorBoundary(자기자신)에서 발생한 에러
+- Event handlers
+- Asynchronous code (e.g. setTimeout or requestAnimationFrame callbacks)
+- Server side rendering
+- Errors thrown in the error boundary itself (rather than its children)
+(공식문서 참고)
+
 
 ### 이벤트 핸들러에서 발생한 에러, 비동기 작업에서 발생한 에러의 경우
 
-이 경우는 렌더링 과정에서 발생하는 에러가 아니므로 포착할 수 없습니다.
+이 경우는 리액트의 렌더링 과정에서 발생하는 에러가 아니므로 포착할 수 없습니다.
 예시 코드는 아래와 같습니다.
 
 ```jsx
@@ -79,26 +81,26 @@ export default function App() {
 }
 
 // 비동기 작업에서 에러가 발생하는 경우
-function AsyncChild() {
+const AsyncChild = () => {
 
-  function throwErrorFn() {
-    throw new Error("will it be catched?");
+  const fireError = () => {
+    throw new Error("에러 발생");
   }
 
-  setTimeout(throwErrorFn, 1000);
+  setTimeout(fireError, 100);
+
   return <div></div>;
 }
 
 // 이벤트 핸들러에서 에러가 발생하는 경우
-function Button() {
-
+const Button = () => {
   return (
     <button
       onClick={() => {
-        throw new Error("will it be catched?");
+        throw new Error("에러 발생");
       }}
     >
-      click
+      fireError
     </button>
   );
 }
@@ -109,38 +111,28 @@ function Button() {
 하지만 이렇게 변경하면 어떨까요?
 
 ```jsx
-export default function App() {
-  return (
-    <ErrorBoundary>
-      <AsyncChild />
-      <Button />
-    </ErrorBoundary>
-  );
-}
 
 // 비동기 작업에서 에러가 발생하는 경우
-function AsyncChild() {
+const AsyncChild = () => {
 	const [isAsyncError, setIsAsyncError] = useState(false);
 
-	useEffect(() => {
-		if(isAsyncError) throw new Error("will it be catched?");
-	}, [isAsyncError])
+	if(isAsyncError) throw new Error("에러 발생");
 
-  function throwErrorFn() {
-		setIsAsyncError(true)
+
+  const updateErrorState = () => {
+    setIsAsyncError(true);
   }
 
-  setTimeout(throwErrorFn, 1000);
+  setTimeout(updateErrorState, 100);
+
   return <div></div>;
 }
 
 // 이벤트 핸들러에서 에러가 발생하는 경우
-function Button() {
+const Button = () => {
 	const [isHandlerError, setIsHandlerError] = useState(false);
 
-	useEffect(() => {
-		if(isHandlerError) throw new Error("will it be catched?");
-	}, [isHandlerError])
+	if(isHandlerError) throw new Error("에러 발생");
 
   return (
     <button
@@ -154,9 +146,9 @@ function Button() {
 }
 ```
 
-이벤트 핸들러와 비동기 작업에서 곧바로 에러를 throw하지 않고, 상태를 변경하고 useEffect를 통해 에러를 throw하도록 수정했습니다.
+이벤트 핸들러와 비동기 작업에서 에러를 throw하지 않고, 상태를 변경하여 리렌더링을 트리거하여 렌더링 과정에서 에러를 throw하도록 수정했습니다.
 
-이 경우, ErrorBoundary는 에러를 포착할 수 있습니다. 이유는 **렌더링 과정에서 발생한 에러이기 때문**입니다.
+이 경우, ErrorBoundary는 에러를 포착할 수 있습니다. 이유는 **렌더링 과정에서 동기적으로 발생한 에러이기 때문**입니다.
 
 그렇다면 react query와 함께 써보면 어떨까요?
 
@@ -262,7 +254,7 @@ ErrorBoundary가 자신의 렌더링 도중에 발생한 에러를 포착하려�
 - 유지보수 포인트가 명확해진다.
     - 에러 발생시 보여줄 컴포넌트나 실행할 함수가 변경되어야 한다면, 즉시 가장 가까운 ErrorBoundary를 찾으면 됩니다.
 - 통일된 에러 처리 로직을 팀원이 공유할 수 있다.
-    - 명령형 코드로 작성할 경우, **개발자의 코딩 스타일에 따라 다르게 구현될 수 있으므로 코드 리뷰의 피로도를 증가시키거나 유지보수시 코드 파악에 시간이 걸릴 수 있습니다.
+    - 명령형 코드로 작성할 경우, 개발자의 코딩 스타일에 따라 다르게 구현될 수 있으므로 코드 리뷰의 피로도를 증가시키거나 유지보수시 코드 파악에 시간이 걸릴 수 있습니다.
 
 ## ErrorBoundary를 조금 수정해봅시다.
 
@@ -270,34 +262,65 @@ ErrorBoundary가 자신의 렌더링 도중에 발생한 에러를 포착하려�
 
 - 에러가 발생하면 실행될 `onError` 구현
 - fallback 컴포넌트에서 에러를 reset할 수 있도록 하는 `resetError` 구현
+- fallback 컴포넌트에서 에러를 reset하며 react-query의 재요청까지 할 수 있도록 하는 `resetErrorWithQuery` 구현
+- ErrorBoundary와 Suspense를 함께 사용하는 `ErrorBoundaryWithSuspense` 구현
 
-```jsx
-import { Component, type ReactElement, type ReactNode } from 'react';
+```tsx
+import { type ErrorBoundaryBaseProps } from "./ErrorBoundaryBase";
+import ErrorBoundaryBase from "./ErrorBoundaryBase";
 
-import type { AxiosError } from 'axios';
+import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 
-interface ErrorBoundaryState {
+const ErrorBoundary = ({
+  fallback,
+  onError,
+  children,
+}: Omit<ErrorBoundaryBaseProps, "resetQuery">) => {
+  const { reset } = useQueryErrorResetBoundary();
+
+  return (
+    <ErrorBoundaryBase fallback={fallback} resetQuery={reset} onError={onError}>
+      {children}
+    </ErrorBoundaryBase>
+  );
+};
+
+export default ErrorBoundary;
+
+```
+
+```tsx
+import { Component, type ReactElement, type ReactNode } from "react";
+
+interface ErrorBoundaryBaseState {
   hasError: boolean;
-  error: AxiosError | null;
+  error: Error | null;
 }
 
-export interface ErrorBoundaryProps {
-  errorFallback?: ReactElement | ((resetError: () => void) => ReactElement);
-  onError?: (error?: AxiosError) => void;
+export interface ErrorBoundaryFallbackParams {
+  error: Error;
+  resetError: () => void;
+  resetErrorWithQuery: () => void;
+}
+
+export interface ErrorBoundaryBaseProps {
+  fallback?: ReactElement | ((params: ErrorBoundaryFallbackParams) => ReactElement);
   children: ReactElement;
+  resetQuery?: () => void;
+  onError?: (error: Error) => void;
 }
 
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
+class ErrorBoundaryBase extends Component<ErrorBoundaryBaseProps, ErrorBoundaryBaseState> {
+  constructor(props: ErrorBoundaryBaseProps) {
     super(props);
     this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError(error: AxiosError): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryBaseState {
     return { hasError: true, error: error };
   }
 
-  componentDidCatch(error: AxiosError): void {
+  componentDidCatch(error: Error): void {
     this.props.onError?.(error);
   }
 
@@ -305,12 +328,25 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     this.setState({ hasError: false, error: null });
   };
 
+  resetErrorWithQuery = () => {
+    this.props.resetQuery?.();
+    this.setState({ hasError: false, error: null });
+  };
+
   render(): ReactNode {
-    if (this.state.hasError) {
+    if (this.state.hasError && this.state.error) {
       const returnElement =
-        typeof this.props.errorFallback === 'function'
-          ? this.props.errorFallback?.(this.resetError)
-          : this.props.errorFallback;
+        typeof this.props.fallback === "function"
+          ? this.props.fallback?.({
+              error: this.state.error,
+              resetError: this.resetError,
+              resetErrorWithQuery: this.resetErrorWithQuery,
+            })
+          : this.props.fallback;
+
+      if (!returnElement) {
+        return this.props.children;
+      }
 
       return returnElement;
     }
@@ -318,9 +354,35 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     return this.props.children;
   }
 }
+export default ErrorBoundaryBase;
 
-export default ErrorBoundary;
 ```
 
-현재 회사에서는 가장 가까운 useQuery를 reset해주는 useQueryErrorResetBoundary Hook과 함께 사용할 수 있도록 구현해두었습니다.
-정리하여 추후 본 글에 추가하도록 하겠습니다.
+```tsx
+
+import { Suspense, type SuspenseProps } from "react";
+
+import ErrorBoundary from "./ErrorBoundary";
+import { type ErrorBoundaryBaseProps } from "./ErrorBoundaryBase";
+
+interface ErrorBoundaryWithSuspenseProps extends Omit<ErrorBoundaryBaseProps, "fallback"> {
+  errorFallback?: ErrorBoundaryBaseProps["fallback"];
+  loadingFallback?: SuspenseProps["fallback"];
+}
+
+const ErrorBoundaryWithSuspense = ({
+  errorFallback,
+  loadingFallback,
+  onError,
+  children,
+}: ErrorBoundaryWithSuspenseProps) => {
+  return (
+    <ErrorBoundary fallback={errorFallback} onError={onError}>
+      <Suspense fallback={loadingFallback}>{children}</Suspense>
+    </ErrorBoundary>
+  );
+};
+
+export default ErrorBoundaryWithSuspense;
+
+```
