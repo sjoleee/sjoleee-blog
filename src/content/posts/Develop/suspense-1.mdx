@@ -69,7 +69,7 @@ export default wrapPromise;
 
 만약 promise가 pending 상태라면 promise를 throw하는 것을 볼 수 있습니다.
 
-이처럼 promise를 throw해주는 로직이 들어가야 suspense가 제대로 동작할 수 있습니다.
+이처럼 **promise를 throw해주는 로직이 들어가야 suspense가 제대로 동작할 수 있습니다.**
 https://github.com/pmndrs/suspend-react 라는 패키지를 사용하면 편하게 throw할 수 있습니다.
 
 다만, react-query에는 이미 이 기능이 구현되어 있습니다. v4 기준 `suspense` 옵션, v5 기준 `useSuspense~` hooks를 사용하면 됩니다.

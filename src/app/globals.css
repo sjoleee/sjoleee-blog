@@ -37,7 +37,7 @@
 }
 
 :has(> .anchor-post-heading) {
-  @apply scroll-m-12 relative;
+  @apply scroll-m-12 relative inline-block;
 }
 
 giscus-widget {
@@ -54,7 +54,7 @@ giscus-widget {
 }
 
 .prose :where(code):not(:where(pre *)) {
-  @apply bg-textColor/10 text-textColor rounded px-1 py-0.5;
+  @apply bg-textColor/10 text-textColor rounded px-1 py-0.5 font-sans;
 }
 
 [data-rehype-pretty-code-figure] pre {
