@@ -1,0 +1,440 @@
+---
+title: 번들러는 무슨 일을 하는 걸까?
+description: 번들링을 하는 이유, 번들러의 역할, 동작 방식 등을 살펴봅니다.
+date: "2024-06-22"
+keywords: [번들러, 번들링, bundle, bundler]
+# thumbnail: "/images/posts/Develop/bundler-1/thumbnail.png"
+---
+
+
+# 번들링이란?
+
+> 여러 자원을 하나의 파일로 결합하는 것
+
+우리는 수많은 모듈을 개발하고, 각 모듈이 서로를 의존하는 형태로 프로그램을 만들고 있습니다.  
+이 많은 모듈을 모두 개별적으로 로드하는 것은 꽤나 비효율적입니다.  
+번들링은 이러한 비효율을 해결하기 위해 여러 모듈을 하나의 파일로 결합하려는 것입니다.  
+
+조금 더 자세히 살펴볼까요?
+
+# 번들링을 하는 이유
+
+> 모듈을 개별적으로 로드하는 것은 하나의 파일을 로드하는 것보다 비효율적이기 때문이다.
+
+애초에 모듈을 개별적으로 로드하는 것은 왜 비효율적일까요?  
+
+모듈을 개별적으로 로드하게 되면, 각 모듈마다 HTTP 요청을 보내야 합니다.  
+HTTP 요청을 보낼때는 도메인을 IP 주소로 변환하는 DNS 조회, TCP 연결, three-way handshake, HTTP 요청, 응답 등의 과정을 거치게 됩니다.  
+아무래도 이런 과정에는 조금이나마 시간이 걸리지 않을까요?  
+
+또한 각 요청과 응답에는 헤더 정보가 포함되어 있어야 합니다.  
+이로 인해 네트워크 비용이 증가하게 됩니다.
+
+예를 들어 볼까요?  
+`1kb 크기의 파일을 100개 로드하는 경우`를 생각해 봅시다.
+
+우선 각 요청과 응답마다 500바이트의 헤더 정보가 포함된다고 가정해 봅시다.  
+따라서 100개의 요청을 위해서는 100kb의 헤더 오버헤드가 발생합니다.
+
+DNS 조회, TCP 연결, TLS 핸드셰이크 등의 과정을 고려하여 각 요청마다 50ms의 네트워크 지연이 발생한다고 가정해 봅시다.  
+100개의 요청을 보내면 총 5초의 네트워크 지연이 발생하게 됩니다.
+
+계산해보면, **100개의 1kb 파일을 로드하는데 총 데이터 전송량은 200kb, 5초의 네트워크 지연이 발생**하게 됩니다.  
+
+이제 `100kb 크기의 파일을 1개 로드하는 경우`를 생각해 봅시다.
+
+1개의 요청을 위해서는 1kb의 헤더 오버헤드가 발생합니다.
+따라서 **1개 요청의 총 데이터 전송량은 101kb가 됩니다. 네트워크 지연은 50ms에 불과**합니다.
+
+헤더 오버헤드와 네트워크 지연을 고려하면, **100개의 1kb 파일을 로드하는 것보다 100kb 파일을 하나 로드하는 것이 훨씬 효율적**입니다.
+
+그리고 사실 100개의 요청은 한 번에 보낼 수 없습니다.
+
+HTTP/1.1 표준(RFC 2616)에서는 클라이언트가 서버에 과부하를 주지 않도록 동시 연결 수를 제한할 것을 권장합니다.  
+주요 브라우저 개발사들이 테스트한 결과, 동시 연결 수를 6개로 제한하는 것이 가장 효율적이라고 결론 내렸다고 합니다.  
+더 많은 연결을 허용하면 네트워크 혼잡과 서버 부하가 증가하고, 너무 적은 연결은 페이지 로딩 속도를 저하시킬 수 있기 때문입니다.  
+따라서 100개의 요청을 보내는 경우, (브라우저마다 조금씩 다르지만) 6개씩 나눠서 보내야 합니다.
+
+HTTP/2는 이러한 문제를 해결하기 위해 하나의 TCP 연결에서 다중 요청(Multiplexing)을 지원합니다.
+HTTP/2는 데이터를 작은 프레임으로 나누어 전송합니다. 각 프레임은 스트림(stream)이라는 논리적 채널에 속하며, 하나의 TCP 연결을 통해 여러 스트림이 병렬로 전송될 수 있습니다.  
+
+그럼에도 여러 요청을 보내는 것보다 하나의 요청을 보내는 것이 효율적이라는 사실은 변함이 없습니다.
+서버와 네트워크 리소스는 여전히 제한적입니다. 너무 많은 스트림이 동시에 열리면 서버의 메모리 및 CPU 사용량이 급격히 증가하여 성능 저하가 발생할 수 있습니다.  
+네트워크 혼잡을 피하고 안정적인 성능을 유지하기 위해 스트림 수를 제한하는 것이 필요합니다.  
+일반적으로 서버는 초기 설정으로 100개의 동시 스트림을 허용하지만, 서버의 성능 및 네트워크 환경에 따라 이 값을 조정할 수 있습니다.
+
+만약 현재 웹사이트가 HTTP/2 프로토콜을 사용하고 있는지 확인하고 싶다면, 브라우저 개발자 도구의 Network 탭에서 Protocol을 확인하면 됩니다.
+`h2`라고 적혀 있다면 HTTP/2 프로토콜을 사용하고 있다는 뜻입니다.
+
+
+# 번들러의 역할
+
+> 여러 모듈을 하나의 파일로 결합하고, 그 과정에서 압축 및 최적화 등의 작업을 수행한다.
+
+번들러는 여러 모듈을 하나의 파일로 결합하는 **번들링**을 수행하는 도구입니다.
+
+## 의존성 관리
+
+상호 의존적인 모듈들을 올바른 순서로 결합하기 위해 모듈 간의 의존성 그래프를 생성하고, 이를 기반으로 번들링을 수행합니다.  
+의존성 그래프를 만드는 과정을 한 번 볼까요?
+
+```js
+// index.js
+import { foo } from './foo.js';
+foo();
+
+// foo.js
+import { bar } from './bar.js';
+export const foo = () => {
+  bar();
+};
+
+// bar.js
+export const bar = () => {
+  console.log('bar');
+};
+```
+
+위와 같은 3개의 모듈이 있다고 가정해 봅시다.  
+번들러는 각 파일의 소스 코드를 파싱하여 추상 구문 트리(AST)를 생성합니다.  
+먼저 `index.js`를 파싱하면 다음과 같은 AST를 생성할 수 있습니다.
+
+```
+Program
+├── ImportDeclaration (import { foo } from './foo.js')
+│   ├── ImportSpecifier (foo)
+│   └── StringLiteral ('./foo.js')
+└── ExpressionStatement (foo())
+    └── CallExpression
+        └── Identifier (foo)
+```
+
+이제 생성된 AST를 통해 각 파일의 의존성을 추적합니다.  
+`import` 또는 `require` 구문을 찾으면 어떤 파일을 의존하는지 알 수 있겠죠?
+이 경우, `foo.js`를 의존하고 있음을 알 수 있습니다.
+이제 `foo.js`의 AST를 생성하면 다음과 같습니다.
+
+```
+Program
+├── ImportDeclaration (import { bar } from './bar.js')
+│   ├── ImportSpecifier (bar)
+│   └── StringLiteral ('./bar.js')
+├── ExportNamedDeclaration (export const foo = ...)
+│   └── VariableDeclaration (const foo = ...)
+│       └── VariableDeclarator
+│           ├── Identifier (foo)
+│           └── ArrowFunctionExpression (foo = () => {...})
+│               └── BlockStatement
+│                   └── ExpressionStatement (bar())
+│                       └── CallExpression
+│                           └── Identifier (bar)
+
+```
+(`bar.js`는 생략합니다.)
+
+이처럼 재귀적으로 의존 관계를 분석하고 AST를 생성하여 의존성 그래프를 그리면 이렇게 그려집니다.
+
+```
+index.js -> foo.js -> bar.js
+```
+
+위 그래프를 기반으로 번들링을 수행하면, `bar.js` -> `foo.js` -> `index.js` 순서로 모듈을 결합할 수 있습니다.
+
+```js
+// 번들링 결과
+const bar = () => {
+  console.log('bar');
+};
+
+const foo = () => {
+  bar();
+};
+
+foo();
+```
+
+이 과정에서 번들러는 동일한 모듈이 여러 번 포함되는 것을 방지하여 번들 파일의 크기를 줄입니다.
+
+참고로, 생성된 AST를 어떻게 저렇게 정확히 알았냐면...  
+[astexplorer](https://astexplorer.net/)에 접속 후 코드를 붙여넣으면 AST를 확인할 수 있습니다.(저는 acorn 파서를 사용했습니다.)  
+eslint 플러그인을 만들때 사용했던 적이 있어서 이번에도 슬쩍 활용해 보았습니다.
+
+## 압축 및 최적화
+
+번들링 과정에서 코드를 압축하고, 트리 쉐이킹을 통해 사용되지 않는 코드를 제거하는 등의 최적화 작업을 수행합니다.
+
+### Minify & Uglify (압축)
+
+압축이란 코드의 크기를 줄이는 것을 의미합니다.  
+주석, 공백, 줄바꿈 등을 제거하고(Minify), 변수명을 짧게 바꾸는(Uglify) 등의 작업을 수행합니다.
+
+```js
+// 압축 전
+const somethingVeryLongFunction = () => {
+  // hi를 출력하는 함수 :)
+  console.log('hi');
+};
+
+// 압축 후
+const a=()=>{console.log('hi')};
+```
+
+### Tree-shaking(트리 쉐이킹)
+
+Tree-shaking은 사용되지 않는 코드를 제거하여 번들 파일의 크기를 줄이는 작업입니다.
+
+```js
+// utils.js
+export function usedFunction() {
+  console.log('This function is used');
+}
+
+export function unusedFunction() {
+  console.log('This function is not used');
+}
+
+// main.js
+import { usedFunction } from './utils.js';
+usedFunction();
+```
+
+위 코드에서 `unusedFunction`은 사용되지 않는 코드이므로, 트리 쉐이킹 후 번들 파일에 포함되지 않습니다.
+아주 편리하죠?😊
+
+그러나 **트리 쉐이킹은 ES6 모듈 시스템(이하 ESM)에서만 가능**합니다.  
+CommonJS 모듈 시스템(이하 CJS)에서는 트리 쉐이킹이 불가능합니다.
+
+> 모듈 시스템에 관한 자세한 이야기는 다른 글에서 다루도록 하겠습니다 🤗
+
+그 이유는 무엇일까요?
+
+트리 쉐이킹은 정적 분석(Static Analysis)을 통해 사용되지 않는 코드를 식별하고 제거합니다.  
+이를 위해서는 빌드 타임에 코드의 의존성 그래프를 명확하게 분석할 수 있어야 합니다.
+
+하지만 CJS는 동적 로딩을 지원하기 때문에 실제로 어떤 함수가 사용되는지는 런타임에만 알 수 있습니다.  
+즉, '모듈의 의존 관계가 런타임에 결정된다'라고 표현할 수 있겠습니다.
+
+```js
+// utils.js
+exports.add = (a, b) => a + b;
+exports.subtract = (a, b) => a - b;
+
+// main.js
+const utils = require('./utils.js');
+console.log(utils.add(1, 2));
+```
+
+여기서 `require`는 런타임에 평가되므로, 번들러가 정적으로 `subtract` 함수가 사용되지 않음을 파악하기 어렵습니다.  
+
+그리고 동적 require 호출을 통해 어떤 모듈을 로드할지가 런타임에 결정되는 경우가 있습니다.
+
+```js
+const modules = someCondition ? './utils.js' : './anotherUtils.js';
+const module = require(modules);
+```
+
+위 예시의 modules는 런타임에 결정되므로, 번들러는 어떤 모듈이 로드되는지 빌드 타임에 알 수 없습니다.
+
+또한 CJS는 로드된 이후에도 `exports` 객체를 동적으로 수정할 수 있습니다.  
+이는 번들러가 모듈의 구조를 신뢰할 수 없게 만듭니다.
+
+```js
+// utils.js
+exports.add = (a, b) => a + b;
+exports.subtract = (a, b) => a - b;
+
+// main.js
+const utils = require('./utils.js');
+if (addNewFunction) {
+  utils.multiply = (a, b) => a * b;
+}
+```
+
+위 예시처럼 `utils` 객체는 런타임에 동적으로 수정될 수 있으므로, 번들러는 어떤 코드가 실제로 사용되는지 파악하기 어렵습니다.  
+이처럼 런타임에만 알 수 있는 정보는 번들링 과정에서 사용할 수 없기 때문에 CJS에서는 트리 쉐이킹을 수행할 수 없습니다.  
+
+반면에 ESM에서 트리 쉐이킹이 가능한 이유는 무엇일까요?  
+아무래도 CJS와 반대라고 생각하면 되겠죠?
+
+ESM의 `import` 구문은 정적으로 평가되기 때문에, 번들러가 빌드 타임에 코드의 의존성 그래프를 명확하게 파악할 수 있습니다.
+
+```js
+// utils.js
+export function add(a, b) {
+  return a + b;
+}
+
+export function subtract(a, b) {
+  return a - b;
+}
+
+// main.js
+import { add } from './utils.js';
+console.log(add(1, 2));
+```
+
+번들러는 `subtract` 함수가 사용되지 않는다는 것을 빌드 타임에 명확하게 파악할 수 있습니다.
+
+또한, ESM에서는 import된 모듈을 동적으로 수정할 수 없습니다.
+    
+```js
+// utils.js
+export function add(a, b) {
+  return a + b;
+}
+
+export function subtract(a, b) {
+  return a - b;
+}
+
+// main.js
+import { add } from './utils.js';
+add = (a, b) => a * b; // ❌ 불가능!
+```
+
+이러한 불변성 덕분에 번들러는 모듈의 구조를 신뢰할 수 있습니다.
+
+## 코드 스플리팅
+
+코드 스플리팅은 번들 파일을 여러 청크로 분할하는 작업을 의미합니다.
+애써 하나로 합쳤는데 왜 분할하는 걸까요..?
+
+번들 파일이 너무 커지면, 초기 로딩 시간이 길어져 UX를 좋지 않게 만들 수 있습니다.
+따라서 초기 번들에 포함될 필요가 없다고 판단되는 코드를 필요할 때 불러오도록 하거나, 초기 번들에 필요한 코드라도 몇 개의 청크로 분할하여 병렬로 로드할 수 있습니다.
+
+React로 개발하고 있다면, `React.lazy`를 사용하여 코드 스플리팅을 쉽게 구현할 수 있습니다.
+
+```js
+const Component = React.lazy(() => import('./Component'));
+```
+
+`React.lazy`는 함수를 인자로 받아 해당 함수가 반환하는 `Promise`가 `resolve`되면 컴포넌트를 렌더링합니다.  
+여기서 사용된 `import`는 번들러에서 제공하는 `동적 import 구문`으로, `Promise`를 반환합니다.  
+동적 import 구문을 만나면 번들러는 해당 모듈을 별도의 청크로 분리하고, 런타임이 되면 `React.lazy`는 해당 청크를 로드합니다.
+
+동적 import 구문에 대해 조금 더 알아볼까요?
+    
+```js
+const module = './module.js';
+
+import(module)
+  .then(module => {
+    // module.js를 로드한 후 실행할 코드
+  });
+```
+
+이렇게 기본적인 예시 말고, 조금 더 고민해볼만한 예시를 하나 들어보자면...
+
+```js
+const modules = someCondition ? './utils.js' : './anotherUtils.js';
+
+import(modules)
+  .then(module => {
+    // modules를 로드한 후 실행할 코드
+  });
+```
+
+위 예시에서 `modules`는 런타임에 결정되는 값입니다.  
+아까 위의 `트리 쉐이킹`에서 CJS가 트리 쉐이킹을 할 수 없는 이유로 들었던 예시인데요, 이는 ESM의 동적 import 구문에서도 마찬가지입니다.  
+ESM을 사용하면 번들러가 빌드 타임에 의존성 관계를 파악할 수 있다고 설명했지만, 어디에나 예외는 있습니다 😉  
+동적 import 구문을 사용하면 번들러는 빌드 타임에 의존성 관계를 파악할 수 없게 됩니다.
+
+그럼 `utils.js`와 `anotherUtils.js`는 번들 파일에 포함될까요? 아니면 별도의 청크로 분리될까요?  
+정답은... **둘 다 별도의 청크로 분리됩니다!**
+
+그럼 트리 쉐이킹은 어떻게 이루어질까요?  
+청크로 나누어진 상태여도 트리 쉐이킹의 대상입니다. 번들러는 각 청크를 분석하여 사용되지 않는 코드를 제거합니다.
+
+이야기가 조금 엇나갔네요.  
+코드 스플리팅은 번들 파일을 여러 청크로 분할하여 초기 로딩 시간을 줄이는 작업입니다.  
+다만, 사용하기에 따라 오히려 초기 로딩 시간이 늘어날 수도 있으니 주의해야 합니다.
+
+## 모듈 포맷 변환
+
+위에서 CJS와 ESM에 대해 대략적으로 설명했는데, 번들러는 이러한 모듈 시스템을 변환하는 작업도 수행합니다.
+어떤 라이브러리를 만드는데, ESM과 CJS를 모두 지원해야 한다면 번들러를 통해 변환하는 작업이 꼭 필요합니다.
+
+간단하게는 위에서 언급한 AST를 통해 `import/export` 구문을 `require/module.exports`로 변환하는 작업이라고 생각하면 될 것 같습니다.  
+`ImportDeclaration` 노드를 찾아서 `VariableDeclaration`과 `CallExpression`으로 변환하고, `ExportNamedDeclaration` 노드를 `exports` 객체로 변환하는 식으로요.  
+하지만 실제로는 `동적 import 구문`, `default export`, `named export`, `Top-Level Await` 등을 고려하여 복잡한 변환 작업이 필요합니다.
+
+간단하게만 예시를 들어보자면 다음과 같습니다.
+
+ESM에서 동적 import 구문을 사용한 경우에는 CJS에서 Promise를 사용하여 동일한 동작을 구현해야 합니다.
+
+```js
+// ESM
+const module = await import('./module.js');
+
+// CJS
+const modulePromise = new Promise((resolve, reject) => {
+  try {
+    const module = require('./module.js');
+    resolve(module);
+  } catch (error) {
+    reject(error);
+  }
+});
+modulePromise.then(module => {
+  // module.js를 로드한 후 실행할 코드
+});
+```
+
+이는 `require`가 동기적으로 동작하는 반면, `import`는 비동기적으로 동작하기 때문입니다.  
+CJS는 파일 시스템 접근을 기반으로 설계되었기 때문에, 로컬 파일 시스템에서 모듈을 동기적으로 로드하는 것이 일반적입니다.  
+반면 ESM은 브라우저 환경에서 네트워크를 통해 모듈을 로드하는 경우를 염두에 두었기 때문에 비동기적으로 동작합니다.  
+여기서 `비동기적` 이라는 표현은 **모듈이 로드되는 동안 다른 작업을 수행할 수 있다는 의미**입니다.
+
+ESM에서 `default export`는 단일 값을 내보내는 용도로 사용됩니다.  
+CJS에서는 `module.exports`를 사용하여 기본 내보내기를 구현합니다.
+
+```js
+// ESM
+export default function myFunction() {
+  console.log('default export');
+}
+
+// CJS
+function myFunction() {
+    console.log('default export');
+}
+module.exports = myFunction;
+```
+
+ESM에서 `named export`는 여러 값을 내보내는 용도로 사용됩니다.
+CJS에서는 `exports` 객체를 사용하여 명명된 내보내기를 구현합니다.
+
+```js
+// ESM
+export function myFunction() {
+  console.log('named export');
+}
+
+// CJS
+function myFunction() {
+    console.log('named export');
+}
+exports.myFunction = myFunction;
+```
+
+이처럼 번들러는 ESM과 CJS를 상호 변환하는 작업도 수행합니다.
+
+## 에셋 관리
+
+작성중 ...
+
+## 트랜스파일링
+
+작성중 ...
+
+## 정적 분석
+
+작성중 ...
+
+## 소스맵 생성
+
+작성중 ...
+
+
+
+
