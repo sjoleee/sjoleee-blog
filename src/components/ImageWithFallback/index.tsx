@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
 import { USER_INFORMATIONS } from "@/constants/data";
 import cn from "@/utils/cn";
 import Image, { ImageProps } from "next/image";

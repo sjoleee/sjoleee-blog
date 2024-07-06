@@ -1,7 +1,6 @@
-import { MouseEvent, useEffect, useRef, useState } from "react";
-
 import { ThemeToggleProps } from "./ThemeToggle";
 
+import { MouseEvent, useEffect, useRef, useState } from "react";
 import useTheme from "@/hooks/useTheme";
 import cn from "@/utils/cn";
 import { AnimatePresence, MotionProps, m, useMotionValue } from "framer-motion";

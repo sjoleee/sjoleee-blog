@@ -1,5 +1,4 @@
 import { ButtonHTMLAttributes } from "react";
-
 import cn from "@/utils/cn";
 
 interface MenuButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {

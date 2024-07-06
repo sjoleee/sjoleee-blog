@@ -1,7 +1,6 @@
 "use client";
 
 import { PropsWithChildren, createContext, useState } from "react";
-
 import changeGiscusTheme from "@/utils/changeGiscusTheme";
 
 export type Theme = "light" | "dark";

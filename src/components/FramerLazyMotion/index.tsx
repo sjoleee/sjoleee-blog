@@ -1,7 +1,6 @@
 "use client";
 
 import { PropsWithChildren } from "react";
-
 import { LazyMotion, domMax } from "framer-motion";
 
 const FramerLazyMotion = ({ children }: PropsWithChildren) => {
