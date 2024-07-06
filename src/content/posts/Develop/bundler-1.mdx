@@ -500,7 +500,7 @@ var example = function example() {
 
 그런데 실제로 Babel을 설치하고 트랜스파일링을 해보면, ES5로 변환되지 않고 그대로 뱉어내는 것을 확인할 수 있습니다.  
 그 이유는 Babel이 **어떻게** 트랜스파일링 할지 알려주는 `plugin`들을 추가하지 않았기 때문입니다.  
-(`@babel/preset-env`)[https://babeljs.io/docs/babel-preset-env]만 추가하면 대부분의 필요한 plugin들을 사용할 수 있습니다.  
+[`@babel/preset-env`](https://babeljs.io/docs/babel-preset-env)만 추가하면 대부분의 필요한 plugin들을 사용할 수 있습니다.  
 
 또한, Babel은 내부적으로 `browserlist`를 사용합니다.  
 브라우저별로, 버전별로 사용할 수 있는 문법이 다르기 때문에 사용할 폴리필도 달라지고, 빌드 결과도 달라집니다.  
