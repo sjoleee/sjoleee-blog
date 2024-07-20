@@ -1,0 +1,334 @@
+---
+title: JSX를 반환하는 함수, 호출해도 될까요?
+description: 중첩 컴포넌트 선언과 함수 컴포넌트 직접 호출이 안티패턴인 이유
+date: "2024-07-18"
+keywords: [React, react, component, 리액트, 함수, 컴포넌트, 호출, 직접호출, call, direct]
+thumbnail: "/images/posts/Develop/direct-call-component/thumbnail.png"
+---
+
+
+# 현실에서 만난 코드
+
+다양한 개발자와 협업하다 보면 그만큼 다양한 코드 스타일을 만나게 됩니다.  
+그 중에서 저에게 큰 혼란을 주었던 케이스를 살펴볼까 합니다.  
+
+아래와 같은 코드를 보신 적 있으신가요?  
+
+```jsx
+const Outer = () => {
+  const inner = () => {
+    return <div>this is inner</div>;
+  };
+
+  return <>{inner()}</>;
+};
+```
+
+이 예시는 현실과 동떨어진 것 같네요. 좀 더 현실적으로 수정해 볼까요?  
+
+```jsx
+const Outer = () => {
+    ...
+
+  const renderIcon = () => {
+    if (error) return <ErrorIcon />;
+    if (loading) return <LoadingIcon />;
+    return <SuccessIcon />;
+  };
+
+  return (
+    <div>
+      ...
+      {renderIcon()}
+      ...
+    </div>
+  );
+};
+```
+
+조건에 맞는 icon을 렌더하기 위한 `renderIcon` 함수를 내부에서 정의하고, 호출하고 있어요.  
+이제 매우 익숙하네요.  
+
+저는 이런 코드를 보면 굉장히 혼란스럽게 느껴졌습니다.  
+_`renderIcon` 함수는 사실상 컴포넌트가 아닌가?_ 라는 생각이 들어서요.  
+이렇게 사용하는 패턴이 과연 괜찮은 것일까요?  
+
+이 글에서는 **중첩 컴포넌트 정의**와 **컴포넌트를 직접 함수 호출**하는 것에 대해 알아봅니다.
+
+---
+
+# 중첩된 컴포넌트
+
+그렇다면 컴포넌트란 무엇일까요?  
+[React 공식 문서](https://react.dev/learn/your-first-component#defining-a-component)에서 말하는 컴포넌트의 정의는 다음과 같습니다.
+
+> - React components are regular JavaScript functions except:
+>    1. Their names always begin with a capital letter. (대문자로 시작)
+>    2. They return JSX markup. (JSX를 반환)
+
+
+`renderIcon` 함수도 JSX를 반환하는 자바스크립트 함수인건 동일합니다.  
+대문자로 시작하지 않는다는 것만 빼면 컴포넌트와 똑같지 않나요?  
+대문자로 한 번 수정해보겠습니다. 
+
+```jsx
+const Outer = () => {
+    ...
+
+  const IconRenderer = () => {
+    if (error) return <ErrorIcon />;
+    if (loading) return <LoadingIcon />;
+    return <SuccessIcon />;
+  };
+
+  return (
+    <div>
+      ...
+	  <IconRenderer />
+      ...
+    </div>
+  );
+};
+```
+
+이제 `IconRenderer` 함수는 공식 문서가 정의하는 컴포넌트 조건을 만족합니다.  
+
+다만, 이렇게 컴포넌트 내부에 컴포넌트를 정의하는 방식은 [React 공식 문서에서 안티 패턴으로 소개](https://react.dev/learn/your-first-component#nesting-and-organizing-components)하고 있습니다.  
+
+> Components can render other components, but **you must never nest their definitions**
+
+중첩된 컴포넌트가 안티패턴인 이유는 `IconRenderer`가 리렌더링 될 때마다 **재생성**되고,  
+새로운 `IconRenderer`는 결국 **이전과 다른 컴포넌트**가 된다는 것 때문입니다.  
+
+가상DOM은 리렌더링 될 때마다 `IconRenderer` 기준으로 서브트리를 전부 새로 그리게 될 것입니다.    
+트리가 깊을수록 `IconRenderer`를 다시 그리는 비용은 비싸지겠죠.  
+또한 `IconRenderer` 내부에 상태가 존재한다면 리렌더링 될때마다 의도치 않게 초기화될 거에요.  
+
+즉, **중첩된 컴포넌트는 잠재적인 성능 문제를 야기할 수 있는 안티 패턴**입니다.  
+(물론 위의 경우에는 상태도 없고, 트리가 깊지 않아 유의미한 손해는 없을거라 생각합니다🤗)  
+
+---
+
+
+# 컴포넌트를 함수 호출로 사용
+
+이제 함수를 직접 호출하여 사용하는 것은 어떨지 한 번 살펴보도록 합시다.  
+
+
+```jsx
+const TestComponent = () => {
+  return <button>TestComponent</button>;
+};
+
+export default function App() {
+  return (
+    <>
+      <TestComponent />
+      {TestComponent()}
+    </>
+  );
+}
+
+```
+
+![](/images/posts/Develop/direct-call-component/1.png)
+
+`TestComponent`를 JSX로 사용해보고, `{TestComponent()}`로 직접 호출도 해봤습니다.  
+_(이제부터 JSX로 사용한 컴포넌트는 `<TestComponent />`, 직접 호출한 것은 `{TestComponent()}`로 부르겠습니다.)_  
+
+눈으로 보이는 결과는 동일합니다.  
+하지만, React 개발자 도구를 통해 확인해보면 두 가지 방식의 결과가 다르게 나타납니다.  
+
+![](/images/posts/Develop/direct-call-component/2.png)
+
+보시다시피 `<TestComponent />`는 컴포넌트로 인식되어 React 개발자 도구에서 확인할 수 있지만,  
+`{TestComponent()}`는 단순한 함수 호출로 인식되어 확인할 수 없습니다.  
+즉, **직접 함수를 호출하면 React가 이를 컴포넌트로 인식하지 못한다는 문제**가 있습니다.  
+
+JSX는 `React.createElement(TestComponent, null);`로 컴파일 된다는 것을 떠올리시면 이해가 쉬울 것 같습니다.  
+_(17버전 이후로는 `react/jsx-runtime`을 사용합니다만, 네이밍이 직관적이라 `createElement`로 적겠습니다😇)_  
+
+JSX라면 `createElement`가 호출되고, Fiber 노드로 변환되어 가상 DOM에 추가됩니다.  
+하지만 `{TestComponent()}`는 `createElement`가 호출되지 않고 단순한 자바스크립트 함수로 호출될 뿐입니다.  
+따라서 Fiber 노드로 변환되지 않고, 단순히 자식 _(JSX)_ 을 반환하는 함수인 것입니다.  
+
+근데 이게 뭐가 문제냐구요?  
+코드를 조금만 더 수정하면 문제가 드러납니다.  
+
+```jsx
+const TestComponent = () => {
+  const [count, setCount] = useState(0)
+  const add = () => setCount(prev => prev + 1);
+  
+  return <button onClick={add}>TestComponent {count}</button>;
+};
+
+export default function App() {
+  return (
+    <>
+      <TestComponent />
+      {TestComponent()}
+    </>
+  );
+}
+
+```
+
+이렇게 코드를 수정한 후 React 개발자 도구를 조금 더 살펴보겠습니다.
+
+![](/images/posts/Develop/direct-call-component/3.png)
+
+호출된 `{TestComponent()}`가 `App`의 hooks로 들어가 있네요!  
+내부에 상태가 사용되었고, 함수로 호출되었기 때문에 이것은 prefix가 없는 hooks에 가깝다고 할 수 있겠습니다.  
+
+그럼 컴포넌트와 hooks의 가장 결정적인 차이는 무엇일까요?  
+바로 **라이프 사이클**입니다.  
+
+hooks가 호출되면 해당 hooks의 내부에서 사용된 hooks는 사용한 컴포넌트에 매핑됩니다.  
+그러니까, `useFoo`의 내부에서 `useBar`를 사용했다면, 그 `useBar`는 `useFoo`을 사용한 컴포넌트에 매핑됩니다.  
+따라서 `{TestComponent()}`의 내부에서 사용한 `count`도 역시 `App`에 매핑되겠죠.  
+_(함수 호출이라고 생각하면 당연한 것입니다. 매핑이라는 용어가 적절한지는 잘 모르겠습니다만...)_  
+
+즉, `{TestComponent()}`는 자신만의 라이프 사이클을 갖지 않습니다.  
+라이프 사이클을 갖는건 `App`이나 `<TestComponent />`와 같은 **컴포넌트**입니다.  
+
+`{TestComponent()}`로 만들어진 버튼을 클릭하면 `App`에 매핑된 `count` 상태가 업데이트됩니다.  
+그리고 `count` 상태가 `App`에 매핑되었기 때문에 앱 전체가 리렌더링 되는 것을 확인할 수 있습니다.  
+**이는 개발자가 의도하지 않은 동작임이 분명합니다.**  
+
+조금 더 곤란해질 수 있는 상황을 [Kent C. Dodds의 아티클](https://kentcdodds.com/blog/dont-call-a-react-function-component)에서 찾아볼 수 있습니다.  
+
+
+```jsx
+import * as React from 'react'
+
+function Counter() {
+	const [count, setCount] = React.useState(0)
+	const increment = () => setCount((c) => c + 1)
+	return <button onClick={increment}>{count}</button>
+}
+
+function App() {
+	const [items, setItems] = React.useState([])
+	const addItem = () => setItems((i) => [...i, { id: i.length }])
+	return (
+		<div>
+			<button onClick={addItem}>Add Item</button>
+			<div>{items.map(Counter)}</div>
+		</div>
+	)
+}
+```
+
+위 코드에서 개발자는 이런 동작을 기대했을 것입니다.
+
+> 버튼을 눌러서 `addItem`이 실행되면  
+> `items`에 새로운 요소가 추가되고  
+> 그에 따라 `Counter`가 하나 늘어난다.
+
+하지만 기대와는 다르게 이런 에러가 발생합니다.  
+
+![](/images/posts/Develop/direct-call-component/4.png)
+
+이는 `Counter`를 렌더하는 부분이 함수 호출로 작성되어있어 발생하는 에러입니다.  
+
+위에서 말했듯이, 함수 호출로 사용할 경우 내부에 사용된 hooks는 부모에게 매핑됩니다.  
+`App`은 버튼 클릭 이전에는 `items` 상태 하나만 갖고 있었으나, 버튼을 클릭하여 리렌더링된 후에는 `items`와 `count` 두개의 상태를 갖게 됩니다.  
+
+즉, 어떤 조건(버튼 클릭으로 인한 `items` 상태 업데이트)으로 인해 hooks가 호출되므로 '조건문 안에서 hooks 사용'과 논리적으로 같은 상황임을 알 수 있습니다.  
+(물론 조건문 안에서 사용한 것은 아니긴 합니다😇 어쨌든 결론적으로 에러가 발생하는 이유는 동일하니까... 느낌 아시죠?)
+
+**hooks는 조건문 안에서 실행할 수 없습니다.** 이는 [공식 문서](https://react.dev/reference/rules/rules-of-hooks#only-call-hooks-at-the-top-level)에도 hooks의 규칙으로 가장 처음 등장합니다.  
+
+> **Only call Hooks at the top level**  
+> 
+> Functions whose names start with `use` are called Hooks in React.  
+> 
+> **Don’t call Hooks inside loops, conditions, nested functions, or `try`/`catch`/`finally` blocks.**  
+> Instead, always use Hooks at the top level of your React function, before any early returns. 
+
+_조건문 안에서 hooks를 쓸 수 없는 이유에 대해서는 바로 다음 글로 작성할 예정이니 잠시 넘어가도록 합시다._  
+
+아무튼, 리렌더링 전후를 비교했을 때 `Counter`가 `App`에 hooks를 추가해버렸고,  
+hooks를 관리하는 linked list가 상이해져서 발생하는 에러라고 요약할 수 있겠습니다.  
+
+그럼 어떻게 해야 에러를 고칠 수 있을까요?  
+우리는 이미 답을 알고 있습니다.  
+
+**JSX로 사용하면 됩니다.** 그럼 React는 컴포넌트로 인식할 수 있고, 자신만의 라이프 사이클을 갖게 됩니다.  
+hooks는 더 이상 `App`에게 매핑되지 않고, `Counter` 컴포넌트에 매핑되어 의도한 대로 동작할 것입니다.  
+
+---
+
+# renderIcon 함수는 잘못된 패턴인가?
+
+다시 처음으로 돌아가서, `renderIcon` 함수를 JSX로 사용하는 것이 안티패턴인가에 대해 생각해봅시다.  
+
+```jsx
+const Outer = () => {
+    ...
+
+  const renderIcon = () => {
+    if (error) return <ErrorIcon />;
+    if (loading) return <LoadingIcon />;
+    return <SuccessIcon />;
+  };
+
+  return (
+    <div>
+      ...
+      {renderIcon()}
+      ...
+    </div>
+  );
+};
+```
+
+위에서 언급했듯이, `renderIcon` 함수는 상태를 사용하지 않고, 트리가 깊지 않습니다.  
+따라서 의도치 않은 동작이나 성능상의 유의미한 손해를 찾기는 어려울 것 같습니다.  
+그리고 상당히 자주 사용되는 패턴이기도 합니다.  
+
+`renderIcon`이 딱히 문제가 없다면 그냥 사용해도 될까요?  
+
+그럼 어떤 함수까지는 괜찮고, 어디부터는 안 괜찮은지 어떻게 판단할 수 있을까요?  
+그리고 어디서는 이런 패턴을 사용하고, 어디서는 사용하지 않는다면 코드의 일관성을 해치지 않을까요?  
+
+따라서 저는 JSX를 반환하는 함수를 반드시 컴포넌트로 사용하는 것이 좋다고 생각합니다.  
+**잠재적인 위협을 차단**하고, **코드의 일관성을 유지**하기 위해서요.  
+
+---
+
+# 정적 분석 도구로 안티패턴 찾기
+
+이렇게 특정 패턴을 안티패턴으로 규정하고, 협업하는 개발자가 지키도록 하는 것은 매우 중요합니다.  
+우리는 `eslint`와 같은 정적 분석 도구를 사용하여 이런 안티 패턴을 사용하지 않도록 강제할 수 있습니다.  
+위에서 언급한 패턴 역시 `eslint`의 도움을 받을 수 있지 않을까요?  
+
+놀랍게도, 이미 `eslint-plugin-react`에서 [이 패턴을 금지하는 규칙의 논의](https://github.com/jsx-eslint/eslint-plugin-react/issues/3208)가 이루어진 적이 있습니다.  
+무려 **경험이 부족한 개발자**들이 사용하는 패턴이라며 발의되었고, 1년동안 이어진 논의 끝에 규칙이 추가되지 않고 종료되었습니다.  
+
+![](/images/posts/Develop/direct-call-component/5.png)
+
+발의자는 이 패턴이 **React 렌더링 최적화의 도움을 받을 수 없는 좋지 않은 패턴**이라고 주장했고,  
+메인테이너는 반대로 **캡슐화된 유용한 패턴**이라고 반박했습니다. `a perfectly reasonable way to reuse an encapsulate code`  
+
+여기서 논의하는 사람들이 모두 한가닥 하는 개발자들이었음에도 1년이나 갑론을박하는 상황이 이어졌다는 것을 생각해보면 이 패턴이 얼마나 복잡한 문제인지 알 수 있습니다.  
+_한 번 읽어보시면 좀 재미있습니다. 서로 상대방을 이해하지 못하는 것 같습니다 ㅋㅋ_  
+
+이 글을 읽는 여러분도 이 패턴이 안티패턴인지, 아니면 유용한 패턴인지 생각해보시면 좋을 것 같습니다.  
+
+어쨌든, 정식 규칙으로 추가되지 않았다고 해도, 우리는 직접 `eslint` 규칙을 추가하여 이 패턴을 금지할 수 있습니다.  
+이렇게 안티패턴을 찾아내고, 이를 방지하기 위한 방법을 찾는 것은 개발자로서 중요한 능력이라고 생각합니다.  
+
+---
+
+# 결론
+
+이 글에서는 **중첩 컴포넌트 정의**와 **컴포넌트를 직접 함수 호출**하는 것에 대해 알아보았습니다.  
+중첩된 컴포넌트는 재생성으로 인한 성능 문제를 야기할 수 있고,  
+함수 호출로 사용할 경우 hooks가 부모에게 매핑되어 의도치 않은 동작을 야기할 수 있습니다.  
+
+제가 내린 결론은, **JSX를 반환하는 함수는 반드시 컴포넌트로 사용하자**는 것입니다.  
+여러분의 의견은 어떠신가요? `{renderIcon()}`에 대한 생각이 조금 바뀌셨나요?🤗  
+
+다음 글에서는 위에서 언급된 **조건문 안에서 hooks 사용**에 대해 알아보겠습니다. 안녕~ 👋
