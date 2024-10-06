@@ -1,0 +1,387 @@
+---
+title: displayName이 필요한 이유
+description: React DevTools 똑똑하게 사용하기🤓
+date: "2024-09-30"
+keywords: [react,displayName,함수,컴포넌트]
+thumbnail: "/images/posts/Develop/display-name/thumbnail.png"
+---
+
+
+얼마 전, 회사에서 `displayName을 작성하지 않아도 괜찮을 것 같다`는 리뷰를 남겼습니다.  
+근데 생각해 보니까 `displayName`에 대해 잘 모르면서 eslint 룰만 신경 쓴 것 같아요.  
+이번 기회에 한 번 공부해 볼까 합니다😇  
+
+---
+
+# displayName이란
+
+`displayName`이라는 이름이 뭔가... 빵집의 쇼케이스에 제품을 식별하기 위해 이름을 붙이는 것 같은 느낌입니다.  
+근데 React에는 컴포넌트가 UI로 존재할 뿐 딱히 이름을 확인할 수 있는 '쇼케이스'라고 부를만한 공간이 없습니다.  
+그럼 왜 이름을 지정해 줘야 할까요? 보이지도 않는데?
+
+`displayName`은 유저에게 보여지는 시각적 요소가 아니라 디버그 이름을 지정하는 정적 속성이라고 할 수 있겠습니다.  
+즉, React는 React DevTools에서 이 속성을 사용하여 컴포넌트를 표시합니다.  
+
+![](/images/posts/Develop/display-name/1.png)
+
+---
+
+# React Devtools의 컴포넌트 이름 추론 과정
+
+React Devtools는 다음과 같은 순서로 컴포넌트의 이름을 결정합니다.  
+
+0. cache된 이름이 있으면 그 값을 사용
+1. `displayName` 속성이 있으면 그 값을 사용
+2. 함수 이름이나 클래스 이름이 있으면 그 이름을 사용
+3. 위 둘 다 없으면 `Anonymous` 사용
+
+```javascript
+// 예시 1: displayName 사용
+const MyComponent = () => <div>Hello</div>;
+MyComponent.displayName = 'CustomName';
+// DevTools에서 'CustomName'으로 표시됨
+
+// 예시 2: 함수 이름 사용
+function NamedComponent() {
+  return <div>Hello</div>;
+}
+// DevTools에서 'NamedComponent'로 표시됨
+```
+
+위 동작은 `react-devtools-shared` 패키지의 `getDisplayName` 함수에서 확인할 수 있습니다.  
+
+```js
+// https://github.com/facebook/react/blob/main/packages/react-devtools-shared/src/utils.js#L136-L158
+
+export function getDisplayName(
+  type: Function,
+  fallbackName: string = 'Anonymous',
+): string {
+  const nameFromCache = cachedDisplayNames.get(type);
+  if (nameFromCache != null) {
+    return nameFromCache;
+  }
+
+  let displayName = fallbackName;
+
+  // The displayName property is not guaranteed to be a string.
+  // It's only safe to use for our purposes if it's a string.
+  // github.com/facebook/react-devtools/issues/803
+  if (typeof type.displayName === 'string') {
+    displayName = type.displayName;
+  } else if (typeof type.name === 'string' && type.name !== '') {
+    displayName = type.name;
+  }
+
+  cachedDisplayNames.set(type, displayName);
+  return displayName;
+}
+```
+
+여기서 `cachedDisplayNames`는 한 번 계산된 이름을 저장하는 WeakMap입니다.  
+컴포넌트가 재사용될 때 별도의 `displayName` 결정 과정을 거치지 않고 값을 재활용하기 위함이라고 추측해 볼 수 있는데,  
+솔직히 작은 애플리케이션에서는 별 차이가 없을 것 같아요.  
+아마 좀 규모있는 애플리케이션에서는 캐싱이 큰 차이를 만들지 않을까 생각해 봅니다.  
+
+---
+
+# displayName은 언제 사용해야 할까?
+
+## 고차 컴포넌트(HOC)를 사용할 때
+
+Devtools에서 어떤 HOC가 사용되었는지 확인하기 어려울 때가 있습니다.  
+
+
+```tsx
+const withHOC = <P extends object>(WrappedComponent: ComponentType<P>) => {
+  return (props: any) => <WrappedComponent {...props} />;
+};
+
+const InnerComponent = () => {
+  return <div>InnerComponent</div>;
+};
+
+const Example = withHOC(InnerComponent);
+```
+
+위와 같이 작성한 후 Example를 렌더링하면 Devtools에서 다음과 같이 표시됩니다.
+
+![](/images/posts/Develop/display-name/2.png)
+
+`withHOC`가 익명 함수를 반환하기 때문에 중첩 구조로 `Anonymous`가 표시됩니다.  
+근데 우리가 아~주 자주 사용하는 HOC인 `forwardRef`는 조금 다르게 표시됩니다.  
+
+![](/images/posts/Develop/display-name/3.png)
+
+
+`내부 컴포넌트명 [ForwardRef]` 양식으로 표시되는데, 이게 훨씬 보기 좋은 것 같네요?  
+우리의 코드도 조금 수정하면 `Anonymous`를 없앨 수 있습니다.  
+
+```tsx
+const withHOC = <P extends object>(WrappedComponent: ComponentType<P>) => {
+  return WrappedComponent;
+};
+
+const InnerComponent = () => {
+  return <div>InnerComponent</div>;
+};
+
+const Example = withHOC(InnerComponent);
+```
+
+이제 `withHOC`는 새로운 컴포넌트를 반환하지 않기 때문에 Devtools에서는 다음과 같이 표시됩니다.  
+(상황에 따라 원래 컴포넌트를 그대로 반환하지 못할 수 있기 때문에 이렇게 사용하지는 못할수도...)
+
+![](/images/posts/Develop/display-name/4.png)
+
+이제 `forwardRef`를 사용했을 때와 비슷~해진 것 같습니다.  
+하지만 어떤 HOC가 사용되었는지, 심지어는 HOC가 사용된 건지 식별하기가 어렵습니다.  
+컴포넌트 이름 옆에 `[ForwardRef]`가 붙는 것 처럼 어떤 HOC가 사용되었는지 알려주려면 어떡해야 할까요?  
+어떡하긴... 소스코드를 한번 확인해 보도록 합시다.  
+
+```ts
+https://github.com/facebook/react/blob/main/packages/react-devtools-shared/src/backend/fiber/renderer.js#L623-L629
+
+function getDisplayNameForFiber(
+    fiber: Fiber,
+    shouldSkipForgetCheck: boolean = false,
+  ): string | null {
+    const {elementType, type, tag} = fiber;
+
+    ...
+
+    switch (tag) {
+      ...
+
+      case ForwardRef:
+        return getWrappedDisplayName(
+          elementType,
+          resolvedType,
+          'ForwardRef',
+          'Anonymous',
+        );
+      ...
+```
+
+컴포넌트의 이름을 결정하는 로직을 보니 `ForwardRef`의 경우에는 `getWrappedDisplayName` 함수를 사용하고 있네요.  
+
+```ts
+https://github.com/facebook/react/blob/main/packages/react-devtools-shared/src/utils.js#L124-L134
+
+export function getWrappedDisplayName(
+  outerType: mixed,
+  innerType: any,
+  wrapperName: string,
+  fallbackName?: string,
+): string {
+  const displayName = (outerType: any)?.displayName;
+  return (
+    displayName || `${wrapperName}(${getDisplayName(innerType, fallbackName)})`
+  );
+}
+```
+
+위 코드를 보면 우리가 `forwardRef`를 사용할 때는 `displayName`이 `ForwardRef(내부 컴포넌트 이름)` 형태로 만들어지는 것을 알 수 있습니다.  
+이제 이걸 아까의 `withHOC` 예시에 적용해볼까요?  
+
+```tsx
+const withHOC = <P extends object>(WrappedComponent: ComponentType<P>) => {
+  WrappedComponent.displayName = `WithHOC(${WrappedComponent.displayName || WrappedComponent.name || 'Component'})`;
+  return WrappedComponent;
+};
+
+const InnerComponent = () => {
+  return <div>InnerComponent</div>;
+};
+
+const Example = withHOC(InnerComponent);
+```
+
+![](/images/posts/Develop/display-name/5.png)
+
+성공적으로 컴포넌트의 이름을 지정할 수 있습니다.  
+이제 DevTools에서 컴포넌트를 쉽게 식별할 수 있겠네요!  
+
+
+## 익명 함수로 정의된 컴포넌트
+
+![](/images/posts/Develop/display-name/6.png)
+
+`forwardRef`를 사용할 때 [eslint가 에러를 뱉었다면](https://github.com/jsx-eslint/eslint-plugin-react/blob/master/docs/rules/display-name.md) 이 경우일 가능성이 큽니다.  
+아래처럼 익명 함수로 컴포넌트를 정의하면 DevTools에서 `Anonymous`로 표시됩니다.  
+
+```tsx
+const Example = forwardRef(() => {
+  return <div>Example</div>;
+});
+```
+
+![](/images/posts/Develop/display-name/7.png)
+
+해결하려면 eslint가 친절하게 안내하는 대로 `displayName`을 지정해주면 됩니다.  
+
+```tsx
+const Example = forwardRef(() => {
+  return <div>Example</div>;
+});
+
+Example.displayName = 'Example';
+```
+
+
+## 조건부 렌더링에서의 활용
+
+조건부 렌더링 시 `displayName`을 활용하면 디버깅이 편해집니다.  
+
+```tsx
+const Example = ({ condition }: Props) => {
+  if (condition) {
+    return <SomeComponent />;
+  }
+
+  return <AnotherComponent />;
+};
+
+Example.displayName = 'ConditionalRenderer';
+SomeComponent.displayName = 'ConditionTrue';
+AnotherComponent.displayName = 'ConditionFalse';
+```
+
+`SomeComponent`, `AnotherComponent` 보다는 `ConditionTrue`, `ConditionFalse`가 더 유용하겠죠?  
+
+## 동적 displayName 생성
+
+컴포넌트의 props에 따라 동적으로 `displayName`을 생성할 수 있습니다.
+
+```tsx
+const Example = ({ id, type }: Props) => {
+  return <div>Example</div>;
+};
+
+Example.displayName = (props) => `Example(${props.type}_${props.id})`;
+
+<Example id="1" type="example" />
+```
+
+이 경우는 `map`을 사용해서 많은 컴포넌트를 렌더링하는 경우 디버깅에 유용할 것 같네요. 
+
+---
+
+# Next.js에서의 displayName
+
+회사에서는 최근 Next.js v14 app router를 사용하고 있습니다.  
+(이 블로그도 동일한 14 버전을 사용하고 있습니다.)  
+위에서 열심히 설명한 것과 다르게 Next.js에서는 `displayName`이 원하는 대로 표시되지 않는 경우도 있더라구요.  
+
+```tsx
+const Example = () => {
+  return <div>Example</div>;
+};
+
+Example.displayName = "displayName은 어디로...";
+// 이렇게 작성해도 표시되지 않습니다.
+export default Example;
+```
+
+근데 반드시 표시되지 않는 것은 아니구요, 사실 **서버 컴포넌트에서만 표시되지 않습니다.**  
+코드를 한 번 살펴보겠습니다.  
+
+
+```ts
+// https://github.com/facebook/react/blob/v18.3.1/packages/react-server/src/ReactFlightServer.js#L500-L511
+
+export function resolveModelToJSON(
+  request: Request,
+  parent: {+[key: string | number]: ReactModel} | $ReadOnlyArray<ReactModel>,
+  key: string,
+  value: ReactModel,
+): ReactJSONValue {
+ 
+ ...
+
+  // Resolve server components.
+  while (
+    typeof value === 'object' &&
+    value !== null &&
+    ((value: any).$$typeof === REACT_ELEMENT_TYPE ||
+      (value: any).$$typeof === REACT_LAZY_TYPE)
+  ) {
+    if (__DEV__) {
+      if (isInsideContextValue) {
+        console.error('React elements are not allowed in ServerContext');
+      }
+    }
+
+    try {
+      switch ((value: any).$$typeof) {
+        case REACT_ELEMENT_TYPE: {
+          // TODO: Concatenate keys of parents onto children.
+          const element: React$Element<any> = (value: any);
+          // Attempt to render the server component.
+          value = attemptResolveElement(
+            element.type,
+            element.key,
+            element.ref,
+            element.props,
+          );
+          break;
+        }
+
+        ...
+```
+
+`resolveModelToJSON` 함수에서 `attemptResolveElement` 함수를 호출할 때 컴포넌트의 `displayName`는 전달되지 않습니다.  
+왜 `displayName`은 전달되지 않을까요?  
+
+이는 서버 컴포넌트의 특성과 관련이 있습니다.  
+서버 컴포넌트는 서버에서 렌더링되고 그 결과만 클라이언트로 전송되기 때문입니다.  
+이 과정에서 불필요한 정보를 최소화해야 서버 컴포넌트의 성능을 최적화할 수 있지 않을까요?  
+그럴 일은 없겠지만, `displayName`이 100억자 문자열 100억 개라면 어떨까요?😇  
+아하, 그럼 성능을 위해 `displayName`을 없앤 거라고 생각할 수 있겠네요!  
+
+근데 개발 모드에서는 디버깅을 쉽게 하는 것이 중요한데, 왜 `displayName`이 전달되지 않을까요?🤔  
+
+클라이언트로 전달된 서버 컴포넌트는 이미 컴포넌트가 아니라 **HTML**입니다.  
+DevTools에서 컴포넌트의 이름을 확인하고 싶어도 애초에 컴포넌트가 아니기 때문에 확인할 수 없습니다.  
+실제로 DevTools에서 확인해보면 다음과 같이 표시됩니다.  
+
+```tsx
+const Example = () => {
+  return (
+    <div>
+      Example
+      <InnerExample />
+    </div>
+  );
+};
+
+Example.displayName = "displayName은 어디로...";
+
+const InnerExample = () => {
+  return <div>InnerExample</div>;
+};
+
+InnerExample.displayName = "displayName은 어디로...??";
+
+export default Example;
+```
+
+| 클라이언트 컴포넌트 | 서버 컴포넌트 |
+|:---:|:---:|
+| ![](/images/posts/Develop/display-name/8.png) | ![](/images/posts/Develop/display-name/9.png) |
+| 정상적으로 `displayName`이 표시됩니다. | `displayName`이 표시되지 않고, 컴포넌트로 잡히지도 않습니다. |
+
+
+---
+
+# 결론
+
+`displayName`은 React 개발에서 (잘 쓰면) 유용한 도구인 것 같습니다.  
+다만, Next.js의 서버 컴포넌트에서는 제거되므로 주의가 필요합니다.  
+
+- HOC와 `forwardRef`를 사용할 때 `displayName`을 설정하세요.  
+- 복잡한 조건부 렌더링이나 동적 컴포넌트에서 `displayName`을 활용해 보세요.  
+- Next.js 프로젝트에서는 서버 컴포넌트와 클라이언트 컴포넌트의 `displayName` 처리 차이를 인지하세요.  
+
+아, 그리고 이번 글에서는 실수로 React stable 버전(18.3.1)을 참고하지 않고 최신 코드(241004 기준)를 참고하여 작성하였습니다.  
+예시로 가져온 코드와 18.3.1 버전의 코드가 다를 수 있으니 양해 부탁드립니다!🙏
