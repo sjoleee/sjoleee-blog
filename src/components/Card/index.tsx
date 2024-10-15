@@ -49,12 +49,14 @@ const Card = ({ className, title, description, thumbnail, category, date }: Card
           <div className="flex flex-col gap-1">
             <span
               className={cn(
-                "group-hover:text-primary text-textColor font-semibold text-base truncate transition-colors",
+                "group-hover:text-primary text-textColor font-semibold text-base whitespace-pre-wrap break-keep transition-colors",
               )}
             >
               {title}
             </span>
-            <p className={cn("text-textColor text-sm truncate")}>{description}</p>
+            <p className={cn("text-textColor text-sm whitespace-pre-wrap break-keep")}>
+              {description}
+            </p>
           </div>
         </div>
         <span className={cn("text-xs font-light text-textColor")}>{convertDate(date)}</span>

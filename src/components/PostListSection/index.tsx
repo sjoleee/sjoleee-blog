@@ -11,7 +11,7 @@ const PostListSection = ({ category }: { category?: string }) => {
       <div className="w-60 h-fit sticky top-16 hidden desktop:flex shrink-0">
         <Sidebar />
       </div>
-      <div className="w-full flex flex-col gap-8 shrink desktop:max-w-[calc(100%-264px)]">
+      <div className="w-full flex flex-col gap-8 desktop:max-w-[712px]">
         <h2 className=" font-black text-textColor text-6xl">
           {category ?? "All"}
           <span className="text-primary text-center items-center justify-center text-[5rem] leading-[0]">
