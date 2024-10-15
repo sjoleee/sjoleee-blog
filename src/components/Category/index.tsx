@@ -3,6 +3,7 @@
 import { CATEGORY_ICONS } from "@/constants/data";
 import cn from "@/utils/cn";
 import getCategories from "@/utils/getCategories";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
 interface CategoryProps {
@@ -28,32 +29,59 @@ const Category = ({ onCategoryItemClick }: CategoryProps) => {
   return (
     <ul className="flex flex-col w-full gap-1">
       <li>
-        <button
-          type="button"
-          onClick={handleCategoryClick()}
-          className={cn(
-            "flex items-center gap-2 text-textColor text-sm transition-all w-full text-left py-2 px-4 rounded-lg desktop:border-none hover:bg-textColor/5",
-          )}
-        >
-          {!!CATEGORY_ICONS["All"] && <span>{CATEGORY_ICONS["All"]}</span>}
-          <span className="font-medium">All</span>
-        </button>
+        {onCategoryItemClick ? (
+          <button
+            type="button"
+            onClick={handleCategoryClick()}
+            className={cn(
+              "flex items-center gap-2 text-textColor text-sm transition-all w-full text-left py-2 px-4 rounded-lg desktop:border-none hover:bg-textColor/5",
+            )}
+          >
+            {!!CATEGORY_ICONS["All"] && <span>{CATEGORY_ICONS["All"]}</span>}
+            <span className="font-medium">All</span>
+          </button>
+        ) : (
+          <Link
+            href="/"
+            className={cn(
+              "flex items-center gap-2 text-textColor text-sm transition-all w-full text-left py-2 px-4 rounded-lg desktop:border-none hover:bg-textColor/5",
+            )}
+          >
+            {!!CATEGORY_ICONS["All"] && <span>{CATEGORY_ICONS["All"]}</span>}
+            <span className="font-medium">All</span>
+          </Link>
+        )}
       </li>
       {categories.map((category) => (
         <li key={category}>
-          <button
-            type="button"
-            onClick={handleCategoryClick(category)}
-            className={cn(
-              "flex items-center gap-2 text-textColor text-sm transition-all w-full text-left py-2 px-4 rounded-lg desktop:border-none tablet:hover:bg-textColor/5",
-              {
-                "bg-textColor/5": params.category === category,
-              },
-            )}
-          >
-            {!!CATEGORY_ICONS[category] && <span>{CATEGORY_ICONS[category]}</span>}
-            <span className="font-medium">{category}</span>
-          </button>
+          {onCategoryItemClick ? (
+            <button
+              type="button"
+              onClick={handleCategoryClick(category)}
+              className={cn(
+                "flex items-center gap-2 text-textColor text-sm transition-all w-full text-left py-2 px-4 rounded-lg desktop:border-none tablet:hover:bg-textColor/5",
+                {
+                  "bg-textColor/5": params.category === category,
+                },
+              )}
+            >
+              {!!CATEGORY_ICONS[category] && <span>{CATEGORY_ICONS[category]}</span>}
+              <span className="font-medium">{category}</span>
+            </button>
+          ) : (
+            <Link
+              href={`/${category}`}
+              className={cn(
+                "flex items-center gap-2 text-textColor text-sm transition-all w-full text-left py-2 px-4 rounded-lg desktop:border-none tablet:hover:bg-textColor/5",
+                {
+                  "bg-textColor/5": params.category === category,
+                },
+              )}
+            >
+              {!!CATEGORY_ICONS[category] && <span>{CATEGORY_ICONS[category]}</span>}
+              <span className="font-medium">{category}</span>
+            </Link>
+          )}
         </li>
       ))}
     </ul>
