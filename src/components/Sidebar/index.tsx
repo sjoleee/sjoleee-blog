@@ -10,7 +10,7 @@ import { Github, Page } from "iconoir-react";
 
 const Sidebar = () => {
   return (
-    <aside className="bg-backgroundLight flex flex-col justify-between gap-24 relative h-full rounded-lg py-4 px-6 overscroll-none overflow-y-scroll shrink-0 z-10">
+    <aside className="bg-backgroundLight flex flex-col justify-between gap-24 relative h-full rounded-lg py-4 px-6 overscroll-none overflow-y-scroll shrink-0 z-10 w-full">
       <div className="flex flex-col gap-8">
         <div className="flex flex-col gap-4">
           <MainLogo />

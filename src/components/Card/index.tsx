@@ -25,7 +25,7 @@ const Card = ({ className, title, description, thumbnail, category, date }: Card
     >
       <div
         className={cn(
-          "w-full overflow-hidden shrink-0 relative flex aspect-video tablet:w-auto tablet:h-full",
+          "w-full overflow-hidden shrink-0 relative flex aspect-[15/9] tablet:w-auto tablet:h-full",
         )}
       >
         <ImageWithFallback
@@ -49,18 +49,12 @@ const Card = ({ className, title, description, thumbnail, category, date }: Card
           <div className="flex flex-col gap-1">
             <span
               className={cn(
-                " group-hover:text-primary text-textColor font-semibold overflow-x-hidden text-base whitespace-nowrap break-words text-ellipsis transition-colors",
+                "group-hover:text-primary text-textColor font-semibold text-base truncate transition-colors",
               )}
             >
               {title}
             </span>
-            <p
-              className={cn(
-                "text-textColor text-sm whitespace-nowrap break-words text-ellipsis overflow-hidden",
-              )}
-            >
-              {description}
-            </p>
+            <p className={cn("text-textColor text-sm truncate")}>{description}</p>
           </div>
         </div>
         <span className={cn("text-xs font-light text-textColor")}>{convertDate(date)}</span>
