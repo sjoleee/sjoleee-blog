@@ -1,0 +1,314 @@
+---
+title: route handler로 고통받기
+description: next.js가 우리에게 알려주지 않는 것들
+date: "2024-10-20"
+keywords: [router handler,라우트핸들러,next,next.js,rsc]
+thumbnail: "/images/posts/Develop/route-handler/thumbnail.png"
+---
+
+
+# 현실의 코드는 공식 문서와 다르다
+
+개발할 때, 특히 회사에서 개발할 때는 생각대로 되지 않는 경우가 참 많은 것 같습니다.  
+특히, '이거.. api 있을 거 같은데?' 라고 생각해서 공식 문서를 확인해 보면 '어 되는 거 맞네?'까지는 잘 흘러가는데요,  
+막상 코드 베이스에 적용하려고 하면, 회사 코드의 특수한 구조나 다양한 상황으로 인해 적용하기 어려운 경우가 많습니다.  
+
+더 나아가서는 공식 문서에 그 정도까지 상세하게 설명해 놓지 않는 경우도 있습니다.  
+아무리 찾아봐도 '이런 상황에 어떻게 동작하느냐'라는 질문에 대한 답이 없을 때가 많습니다.  
+
+최근 회사에서 next.js의 route handler를 사용할 일이 생겼는데요,  
+반드시 서버 to 서버로 요청해야 하는 문제도 있고, 제가 컨트롤할 수 없는 모듈이 server-only로 되어있기도 하고...  
+다양한 사정으로 인해 route handler를 사용할 수밖에 없었습니다.  
+
+팀원 모두가 route handler를 사용해야 할 것 같아 조사한 내용을 공유했었는데요, 해당 내용을 바탕으로 글을 작성하였습니다.  
+
+
+### route handler
+
+route handler는 서버에서 실행되는 api 엔드포인트입니다.  
+간단히는 next.js 서버에게 요청을 보내는 것이라고 생각하면 됩니다.  
+자세한 내용은 [공식 문서](https://next.js.org/docs/app/building-your-application/routing/route-handlers)를 참고하세요!  
+(라고 말은 했지만, 공식 문서에 대단한 설명이 있지는 않습니다.)
+
+제가 route handler를 사용해야 했던 상황은 클라이언트 > next.js 서버 > 외부 api 서버 순으로 요청을 보내야 하는 상황이었습니다.  
+아까 언급했듯 서버 to 서버로만 요청을 보낼 수 있으며, 특정 모듈은 server-only로 되어있기 때문에 선택지가 없었습니다.
+
+예시로 사용할 코드는 클라이언트 > next.js 서버 > poke api를 호출하는 코드입니다.  
+
+```ts
+// src/app/api/poke/route.ts
+
+export async function GET() {
+  const res = await fetch("https://pokeapi.co/api/v2/pokemon/ditto");
+  const data = await res.json();
+
+  return Response.json({ data });
+}
+```
+
+---
+
+# 현실의 코드
+
+
+## 상황 1. 클라이언트 컴포넌트에서 route handler 호출
+
+클라이언트 컴포넌트에서 route handler를 호출하는 코드입니다.  
+저희 회사에서는 이 상황을 위해 route handler를 사용하고 있다고 볼 수 있습니다.  
+
+- 서버 컴포넌트에서 react-query의 prefetchQuery를 사용하여 데이터를 가져온다.(서버 to 서버)
+- 클라이언트 컴포넌트에서 useSuspenseQuery로 서버 컴포넌트가 넘겨준 데이터를 사용한다.
+- 서버 컴포넌트에서 prefetch가 실패할 경우, 클라이언트 컴포넌트에서 fetch해야 한다.(클라이언트 to 서버)
+- 서버 to 서버만 가능하기 때문에 route handler를 사용해서 클라이언트 to 서버 to 서버로 만든다.
+
+```tsx
+"use client";
+
+const Example = () => {
+  const fn = async () => {
+    const data = await (await fetch("/api/poke")).json();
+    console.log(data);
+  };
+
+  fn();
+  // useEffect를 사용하면 어차피 브라우저에서만 돌아가니 논외로 합니다.
+  // 실제로 이렇게 사용하는 경우는 없을 거라 생각합니다.
+
+  return <div>Example</div>;
+};
+
+export default Example;
+```
+
+이제 Example 컴포넌트를 사용하면 어떻게 될까요?  
+생각해야 할 것이 한둘이 아닌 데, 정리하는 것이 조금 까다로워서 의식의 흐름대로 쭉 적어보도록 하겠습니다.
+
+### next dev (개발 환경)
+
+next dev로 개발 서버를 실행해보겠습니다. 
+
+![](/images/posts/Develop/route-handler/1.png)
+클라이언트 측에서 별문제 없이 잘 동작합니다.  
+
+하지만 서버 측에서는 아래와 같은 에러가 발생합니다.  
+
+```
+TypeError: Invalid URL
+      at new URL (node:internal/url:775:36)
+      at new Request (node:internal/deps/undici/undici:5270:25)
+      ...
+```
+
+에러를 살펴보면 URL을 제대로 인식하지 못했다는 것을 알 수 있습니다.  
+브라우저에서는 `/api/poke`가 현재 도메인을 기준으로 자동으로 해석되지만, Node.js 환경에서는 전체 URL이 필요합니다.
+
+> - 브라우저와 달리 Node.js는 서버 사이드 환경입니다. 브라우저에서는 현재 페이지의 URL을 기준으로 상대 경로를 해석할 수 있지만, Node.js에는 그런 기준점이 없습니다.
+> - Node.js는 파일 시스템에서 실행되는 환경이기 때문입니다. 브라우저처럼 특정 URL 컨텍스트 내에서 동작하지 않아 상대 경로의 기준점을 자동으로 설정할 수 없습니다.
+> - 절대 URL을 사용하면 요청의 대상이 명확해집니다. 이는 잠재적인 보안 위험을 줄일 수 있습니다. 예를 들어, 상대 경로를 사용할 경우 의도하지 않은 리소스에 접근할 수 있는 위험이 있습니다.
+
+'서버에서는 '현재 도메인'이라는 개념이 없기 때문'이며, '파일 시스템이라는 환경의 특수성' 정도로 생각해 볼 수 있을 것 같습니다.  
+
+next dev 환경 기준으로 클라이언트 컴포넌트에서 상대 경로를 사용해 route handler를 호출하면 서버 사이드에서 `TypeError: Invalid URL` 에러가 발생합니다.  
+아, 해결하려면 그냥 전체 URL을 써주면 됩니다.  
+물론 실제 프로덕션에서 이렇게 하드 코딩할 수는 없겠지만요...
+
+```tsx
+const data = await (await fetch("http://localhost:3000/api/poke")).json();
+```
+
+### next start (프로덕션 환경)
+
+그럼 개발 환경이 아니라 프로덕션 환경에서는 어떨까요?  
+`next start`로 프로덕션 환경을 실행해 보겠습니다. (`next build` 후 `next start`)
+
+![](/images/posts/Develop/route-handler/2.png)
+음, 잘 동작합니다. 서버 콘솔에 에러 로그도 없습니다.  
+
+정말 에러가 없을까요?  
+애초에 이 응답은 브라우저에서 확인한 것이라 지금 궁금한 서버 측 에러 여부와는 무관합니다.  
+
+---
+
+#### next build
+
+조금 이야기를 바꿔서, `next start`란 무엇일까요?  
+간단하게 말하면 프로덕션 환경처럼 빌드 결과물을 실행하는 것입니다.  
+
+next.js와 같이 SSR을 지원하는 프레임워크의 목적은 '효율'이라고 생각합니다.  
+렌더링하는 범위에서 '가능한' 정적 렌더링으로 동작하며, 미리 만들어둔 html을 반환하여 최대한 빠르게 화면을 보여줍니다.  
+예를 들어, `searchParams`라던지, `cookies`와 같은 동적 데이터를 사용할 때는 next.js가 자동으로 동적 렌더링으로 동작합니다.  
+
+우리의 route handler를 사용한 컴포넌트는 정적 렌더링으로 동작할 수 있을까요?  
+이것을 확인하기 위해서는 route handler를 조금 더 구체적으로 살펴봐야 합니다.  
+
+위에서 말한 것처럼, `next start`는 빌드 결과물을 실행하는 것이기 때문에 빌드 과정에서 만들어진 정적 데이터를 반환합니다.  
+그럼, route handler가 빌드 과정에서 어떻게 처리되는지 한 번 보도록 합시다.  
+
+```ts
+// src/app/api/poke/route.ts
+
+export async function GET() {
+  const res = await fetch("https://pokeapi.co/api/v2/pokemon/ditto");
+  const data = await res.json();
+
+  return Response.json({ data });
+}
+```
+위의 route handler를 빌드하면 로그에 이런 메시지가 있습니다.  
+
+![](/images/posts/Develop/route-handler/3.png)
+
+`/api/poke` 즉, route handler의 경로가 빌드 과정에서 점으로 표현됩니다.  
+점이 의미하는 것은 사진에 나와 있듯이 빌드 과정에서 미리 만들어놓은 정적 데이터를 반환하는 것입니다.  
+포켓몬 api를 호출한 결과를 미리 정적 데이터로 만들어놓고, 요청이 들어오면 그냥 반환하기만 하는 것입니다.  
+
+요것은 빌드 결과물을 확인해 보면 알 수 있는데요, 아래처럼 미리 데이터를 정적 파일로 만들어둡니다.
+요청이 오면 이 데이터를 반환하기만 하면 되기 때문에 훨씬 효율적입니다.  
+![](/images/posts/Develop/route-handler/4.png)
+
+![](/images/posts/Develop/route-handler/5.png)
+이 `limber`라는 단어를 `sjoleee`로 바꾸면...?
+
+![](/images/posts/Develop/route-handler/6.png)
+![](/images/posts/Develop/route-handler/7.png)
+
+정말 바뀐 내용이 담겨서 내려오는 것을 확인할 수 있습니다.
+
+그리고 또 하나 재밌는 내용이 있는데요, 만약 route handler에서 지연 시간을 주면 어떻게 될까요?  
+이것은 회사에서 백엔드 개발자분이 실제로 겪었던 이슈인데요, 몇 초 후에 resolve되는 promise를 사용해 응답을 지연시키려고 했으나, 자꾸 즉시 응답이 반환되는 바람에 상당히 고생했다고 합니다.  
+route handler는 데이터를 빌드 타임에 만들어두고 그것을 단순히 반환하기만 하기 때문입니다.  
+
+이게 싫다면? on-demand로 만들어야 합니다.  
+route handler를 정의할 때 `force-dynamic` 예약어를 사용하거나, 내부에서 동적 데이터(searchParams 등)를 사용하면 자동으로 동적 렌더링으로 동작합니다.  
+
+![](/images/posts/Develop/route-handler/8.png)
+빌드 로그에서 `api/poke`가 점이 아니라 f, Dynamic으로 표시됩니다.  
+정적 데이터인 `poke.body`도 생성되지 않습니다.  
+
+
+다시 돌아가서, 우리의 코드를 빌드하다 보면 route handler를 사용한 컴포넌트에서 에러가 발생하는 것을 확인할 수 있습니다.  
+
+```
+TypeError: Invalid URL
+      at new URL (node:internal/url:775:36)
+      at new Request (node:internal/deps/undici/undici:5270:25)
+      ...
+```
+
+위에서 발생한 것과 동일한 URL 에러입니다.  
+이유도 동일합니다. next build시 프리렌더링 과정에서 전체 URL을 제공하지 않았기 때문에 발생합니다.  
+
+다만, 개발 환경에서 전체 URL을 제공하면 해결되었던 것과 다르게 `http://localhost:3000/api/poke`라는 전체 URL을 제공해도 에러는 발생합니다.  
+
+```
+TypeError: fetch failed
+    at Object.fetch (node:internal/deps/undici/undici:11730:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async /Users/sjoleee/programming/sjoleee-blog/.next/server/app/page.js:1:2981 {
+  cause: AggregateError
+      at internalConnectMultiple (node:net:1114:18)
+      at afterConnectMultiple (node:net:1667:5)
+      at TCPConnectWrap.callbackTrampoline (node:internal/async_hooks:130:17) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+```
+
+에러 로그가 아까와는 조금 다른데요, 전체 URL을 제공했기 때문에 `Invalid URL` 에러는 아닙니다.  
+`ECONNREFUSED`에러는 포트가 열려있으나 서비스가 응답하지 않음, 서버가 실행 중이 아닐 때, 방화벽이 차단할 때 발생합니다.  
+
+그중에서도 `localhost`는 항상 DNS 리졸브되는(127.0.0.1) 특별한 주소입니다.
+따라서 우리의 경우, `localhost`가 `127.0.0.1`로 리졸브되고,  
+TCP/IP 스택에서 연결(3-way handshake)을 시도했지만 3000번 포트가 닫혀(서버X)있어 `ECONNREFUSED` 에러가 발생합니다.  
+
+
+---
+
+자, `next start`로 돌아와서 아까 전의 `next start` 환경에서 route handler를 호출한 경우를 살펴보겠습니다.  
+
+```tsx
+"use client";
+
+const Example = () => {
+  const fn = async () => {
+    const data = await (await fetch("/api/poke")).json();
+    console.log(data);
+  };
+
+  fn();
+  // useEffect를 사용하면 어차피 브라우저에서만 돌아가니 논외로 합니다.
+  // 실제로 이렇게 사용하는 경우는 없을 거라 생각합니다.
+
+  return <div>Example</div>;
+};
+
+export default Example;
+```
+
+개발 환경(`next dev`)처럼 URL을 생략했기 때문에 서버 측에서 에러가 발생합니다.  
+단, 프로덕션 환경에서 서버 에러를 확인할 수는 없습니다.  
+next.js는 프로덕션 환경에서 일부 에러 로그를 출력하지 않습니다.  
+다양한 방법으로 한 번 테스트해 보시면 아실 수 있을 것입니다. 요것까지 적으려니 너무 길어지네요.  
+
+`/api/poke`대신 `http://localhost:3000/api/poke`로 요청하면 어떻게 될까요?  
+
+잘 됩니다.  
+`next start` 환경에서는 서버가 실행되기 때문에 localhost 전체 URL을 제공할 경우 정상적으로 동작합니다.  
+
+배포 후에는 localhost가 아니라 실제 도메인을 사용하기 때문에 환경에 맞는 baseUrl을 env에 설정해 두고 사용하는 것이 일반적일 것 같습니다.   
+뭐... `dev.product.com`, `prod.product.com` 이런 식으로 말이죠.  
+
+
+
+
+## 상황 2. 서버 컴포넌트에서 route handler 호출
+
+사실 클라이언트 컴포넌트가 서버에서도 렌더링 되므로 대부분의 내용을 위에서 다루었습니다.  
+
+```tsx
+const Example = async () => {
+  const data = await (
+    await fetch(`/api/poke}`, {
+      cache: "no-cache",
+    })
+  ).json();
+
+  console.log(data);
+
+  return <div>Example</div>;
+};
+
+export default Example;
+```
+
+route handler는 그대로 유지하고, `Example` 컴포넌트만 서버 컴포넌트로 변경합니다.  
+
+아시다시피 이 컴포넌트는 빌드 과정에서 URL 에러가 발생합니다.  
+클라이언트 컴포넌트와 달리 즉시 빌드가 중단되고, 빌드 로그에 에러 메시지가 출력됩니다.  
+
+이 현상은 정확히 파악하지는 못했는데요, 클라이언트 컴포넌트에서 fetch로 인한 서버 측 에러가 발생하면 빌드가 중단되지 않고, 서버 컴포넌트에서 서버 측 에러가 발생하면 빌드가 중단되는 것 같습니다.  
+만약 `fetch` 에러가 아니라 `throw new Error()`로 에러를 발생시키면 빌드가 중단되는 것을 확인할 수 있습니다.  
+일반적인 에러는 컴포넌트 자체의 실행 불가능을 의미하므로 빌드를 중단하는 것이 아닐까 싶긴 한데... 조금 더 조사가 필요한 내용일 듯싶습니다.  
+
+어쨌든, 이 컴포넌트는 빌드 과정에서 URL 에러가 발생하고 빌드가 중단됩니다.  
+전체 URL을 제공해도 마찬가지입니다. 서버가 없으니 전체 URL을 제공해도 에러가 발생하고 빌드가 중단됩니다.  
+그럼 서버 컴포넌트는 router handler를 사용할 수 없는 걸까요?🥲
+
+네.  
+[vercel 블로그에서 route handler는 서버 컴포넌트에서 사용하지 말라](https://vercel.com/blog/common-mistakes-with-the-next-js-app-router-and-how-to-fix-them#using-route-handlers-with-server-components)고 이야기하고 있습니다.  
+컴포넌트에서 직접 서버로 fetch 날리면 애초에 route handler를 쓸 필요 없도 없다는 내용입니다.  
+런타임 환경변수를 사용해서 빌드 타임에만 route handler를 호출하지 않도록 우회하는 방식도 있을 것 같습니다만,  
+**쓰지 말라면 쓰지 맙시다...**
+
+---
+
+# 결론
+
+fetch할 때 서버 사이드에서는 완전한 URL을 제공해야 정상적으로 동작합니다.  
+따라서 route handler를 사용할 때도 fetch에게 전체 URL을 제공해야 합니다.  
+
+클라이언트 컴포넌트에서 route handler를 사용할 경우, 빌드 과정에서 에러가 발생하나 빌드가 중단되지 않습니다.  
+반면 서버 컴포넌트에서 route handler를 사용할 경우, 빌드 과정에서 에러가 발생하고 빌드가 중단됩니다.  
+
+vercel에서 공식적으로 가이드하듯, **서버 컴포넌트에서는 route handler를 사용하지 않는 것을 추천합니다.**
