@@ -1,7 +1,7 @@
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
-
+import rehypeExternalLinks from "rehype-external-links";
 import { ComputedFields, defineDocumentType, makeSource } from "contentlayer/source-files";
 import rehypePrettyCode from "rehype-pretty-code";
 
@@ -61,6 +61,13 @@ export default makeSource({
     remarkPlugins: [remarkGfm],
 
     rehypePlugins: [
+      [
+        rehypeExternalLinks,
+        {
+          target: "_blank",
+          rel: ["noopener", "noreferrer"],
+        },
+      ],
       [
         rehypePrettyCode,
         {

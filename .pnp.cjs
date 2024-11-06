@@ -51,6 +51,7 @@ const RAW_RUNTIME_STATE =
           ["react", "npm:18.2.0"],\
           ["react-dom", "virtual:52439f2cc4c486fa9d1e15054819ae4806947a3b9a1d9487877046dd11ab0fdb6af036acdaa5b825f88cdae646938defdb6e28e8f7a703c6795e23345c3705d2#npm:18.2.0"],\
           ["rehype-autolink-headings", "npm:7.1.0"],\
+          ["rehype-external-links", "npm:3.0.0"],\
           ["rehype-pretty-code", "virtual:52439f2cc4c486fa9d1e15054819ae4806947a3b9a1d9487877046dd11ab0fdb6af036acdaa5b825f88cdae646938defdb6e28e8f7a703c6795e23345c3705d2#npm:0.13.2"],\
           ["rehype-slug", "npm:6.0.0"],\
           ["remark-gfm", "npm:3.0.1"],\
@@ -5586,6 +5587,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["is-absolute-url", [\
+      ["npm:4.0.1", {\
+        "packageLocation": "./.yarn/cache/is-absolute-url-npm-4.0.1-e2251049d8-de172a7184.zip/node_modules/is-absolute-url/",\
+        "packageDependencies": [\
+          ["is-absolute-url", "npm:4.0.1"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["is-alphabetical", [\
       ["npm:2.0.1", {\
         "packageLocation": "./.yarn/cache/is-alphabetical-npm-2.0.1-054fa4f335-56207db8d9.zip/node_modules/is-alphabetical/",\
@@ -8467,6 +8477,21 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["rehype-external-links", [\
+      ["npm:3.0.0", {\
+        "packageLocation": "./.yarn/cache/rehype-external-links-npm-3.0.0-1652b48ebe-b9b2e4e597.zip/node_modules/rehype-external-links/",\
+        "packageDependencies": [\
+          ["rehype-external-links", "npm:3.0.0"],\
+          ["@types/hast", "npm:3.0.4"],\
+          ["@ungap/structured-clone", "npm:1.2.0"],\
+          ["hast-util-is-element", "npm:3.0.0"],\
+          ["is-absolute-url", "npm:4.0.1"],\
+          ["space-separated-tokens", "npm:2.0.2"],\
+          ["unist-util-visit", "npm:5.0.0"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["rehype-parse", [\
       ["npm:9.0.0", {\
         "packageLocation": "./.yarn/cache/rehype-parse-npm-9.0.0-d5d4ac742e-fe35d7745d.zip/node_modules/rehype-parse/",\
@@ -9954,6 +9979,7 @@ const RAW_RUNTIME_STATE =
           ["react", "npm:18.2.0"],\
           ["react-dom", "virtual:52439f2cc4c486fa9d1e15054819ae4806947a3b9a1d9487877046dd11ab0fdb6af036acdaa5b825f88cdae646938defdb6e28e8f7a703c6795e23345c3705d2#npm:18.2.0"],\
           ["rehype-autolink-headings", "npm:7.1.0"],\
+          ["rehype-external-links", "npm:3.0.0"],\
           ["rehype-pretty-code", "virtual:52439f2cc4c486fa9d1e15054819ae4806947a3b9a1d9487877046dd11ab0fdb6af036acdaa5b825f88cdae646938defdb6e28e8f7a703c6795e23345c3705d2#npm:0.13.2"],\
           ["rehype-slug", "npm:6.0.0"],\
           ["remark-gfm", "npm:3.0.1"],\
