@@ -97,34 +97,28 @@ const CustomCursorThemeToggle = ({
       </AnimatePresence>
       {isImageButton ? (
         <>
-          <Image
-            src={lightImageSrc}
-            alt=""
-            width={480}
-            height={240}
-            className={cn(
-              "absolute w-full h-full top-0 left-0 object-cover transition-all rounded-lg ",
-              {
-                "opacity-0": theme === "dark",
-              },
-            )}
-            placeholder="blur"
-            blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII="
-          />
-          <Image
-            src={darkImageSrc}
-            alt=""
-            width={480}
-            height={240}
-            className={cn(
-              "absolute w-full h-full top-0 left-0 object-cover transition-all rounded-lg ",
-              {
-                "opacity-0": theme === "light",
-              },
-            )}
-            placeholder="blur"
-            blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII="
-          />
+          {theme === "light" && (
+            <Image
+              src={lightImageSrc}
+              alt=""
+              width={480}
+              height={240}
+              className="absolute w-full h-full top-0 left-0 object-cover transition-all rounded-lg"
+              placeholder="blur"
+              blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII="
+            />
+          )}
+          {theme === "dark" && (
+            <Image
+              src={darkImageSrc}
+              alt=""
+              width={480}
+              height={240}
+              className="absolute w-full h-full top-0 left-0 object-cover transition-all rounded-lg"
+              placeholder="blur"
+              blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII="
+            />
+          )}
         </>
       ) : (
         themeEmoji

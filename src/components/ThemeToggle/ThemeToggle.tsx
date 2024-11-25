@@ -41,24 +41,24 @@ const ThemeToggle = ({
     >
       {isImageButton ? (
         <>
-          <Image
-            src={lightImageSrc}
-            alt=""
-            width={480}
-            height={240}
-            className={cn("absolute w-full h-full top-0 left-0 object-cover transition-all", {
-              "opacity-0": theme === "dark",
-            })}
-          />
-          <Image
-            src={darkImageSrc}
-            alt=""
-            width={480}
-            height={240}
-            className={cn("absolute w-full h-full top-0 left-0 object-cover transition-all", {
-              "opacity-0": theme === "light",
-            })}
-          />
+          {theme === "light" && (
+            <Image
+              src={lightImageSrc}
+              alt=""
+              width={480}
+              height={240}
+              className="absolute w-full h-full top-0 left-0 object-cover transition-all rounded-lg"
+            />
+          )}
+          {theme === "dark" && (
+            <Image
+              src={darkImageSrc}
+              alt=""
+              width={480}
+              height={240}
+              className="absolute w-full h-full top-0 left-0 object-cover transition-all rounded-lg"
+            />
+          )}
         </>
       ) : (
         themeEmoji
