@@ -49,16 +49,14 @@ thumbnail: "/images/posts/Develop/polymorphic-components/thumbnail.png"
 OCP, 즉 개방-폐쇄 원칙은 객체 지향의 다섯 가지 원칙(SOLID) 중 하나입니다.  
 여기서 말하는 개방은 확장에 대한 개방, 폐쇄는 수정에 대한 폐쇄를 의미합니다.  
 
-예를 들어, 우리가 `<Button as="a">` 처럼 사용한다면, 버튼에 새로운 기능(`a` 태그의 속성)을 추가할 때 기존 Button 컴포넌트의 코드를 수정하지 않아도 됩니다.  
+우리가 `<Button as="a">` 처럼 사용한다면, 버튼에 새로운 기능(`a` 태그의 속성)을 추가할 때 기존 Button 컴포넌트의 코드를 수정하지 않아도 됩니다.  
 이는 OCP를 잘 준수한 예시라고 할 수 있죠.  
 
-또한, 아래에서 살펴볼 리액트에서 다형성 컴포넌트를 구현하는 방식들은 구체적인 구현을 숨기고, 필요한 동작만을 외부에 노출하도록 추상화, 캡슐화가 적용되어 있습니다.  
-
-컴포넌트 관점에서 본다면, `as` prop은 컴포넌트의 재사용성을 높여주고, 유연성을 제공해 줍니다.  
-버튼이 다양한 형태로 사용될 수 있으니, 재사용성은 당연히 높아지겠죠?🤗  
+다형성이 적용된 컴포넌트는 다양한 형태로 사용될 수 있으니, 재사용성, 유연성은 당연히 높아지겠죠?🤗 
 또한, 시맨틱한 태그를 사용할 수 있게 되니 접근성, 가독성도 좋아진다고 볼 수 있습니다.  
+그리고 리액트에서 다형성 컴포넌트를 구현하는 방식들은 구체적인 구현을 숨기고, 필요한 동작만을 외부에 노출하도록 추상화, 캡슐화가 적용되어 있습니다.  
 
-자, 그럼 리액트에서 다형성을 가지는 컴포넌트는 어떻게 구현할 수 있을까요?  
+이제 다형성 컴포넌트를 어떻게 구현할 수 있는지 알아보겠습니다.  
 
 ---
 
@@ -100,11 +98,12 @@ const Button = ({ asChild, ...props }: ButtonProps) => {
 이런 방식으로 다형성을 가지는 컴포넌트를 구현할 수 있습니다.  
 
 끝! 이면 좋겠지만, 이 방식은 컴포넌트의 UI가 복잡하다면 사용하기 어렵습니다.  
-제가 이 글을 작성하게 된 계기가 바로 이것 때문이었어요...🥲  
+`asChild`로 모든 것이 해결되었다면 이 글을 쓰지 않았을 거예요...🥲  
 
 만약, 이런 식으로 복잡한 녀석이라면?  
 
 ```tsx
+// UI 요구사항을 만족하기 위해 이렇게 중첩된 구조를 갖게 됐다면?
 <button>
   <div>
     <div>{leftIcon}</div>
@@ -123,6 +122,7 @@ const Button = ({ asChild, ...props }: ButtonProps) => {
 ```tsx
 const Button = ({ asChild, ...props }: ButtonProps) => {
   const Comp = asChild ? Slot : "button";
+
   return (
     <Comp {...props}>
       <div>
@@ -163,10 +163,12 @@ const Button = ({ asChild, ...props }: ButtonProps) => {
 
 넵. 안됩니다.  
 `Slot`은 직계 자식에만 적용되기 때문에 이런 식으로 사용할 수 없습니다.  
+렌더링된 실제 DOM 구조를 보면 `Slot` 자리에 `Link`가 아닌 `div`가 들어가 있습니다.  
+해당 구조에서 `Slot`의 직계 자식은 `div`이기 때문에 `Button`의 `children`으로 뭘 넣든 `div`로 렌더링되는 것이죠.  
 `Slottable`을 사용하면 여러 직계 자식 중에서 어떤 것으로 렌더링할지 선택할 수는 있습니다만, 이렇게 중첩된 구조에서는 활용하기 어렵습니다.  
 
 저는 회사에서 shadcn을 사용해서 디자인 시스템을 구현하고 있는데, 이 문제를 가능한 한 간단하게 해결하고 싶었어요.  
-그리고 분명히 저와 비슷한 고민을 한 사람이 있을 거로 생각해서 이슈를 좀 찾아봤는데, 이미 [논의가 이루어졌고, 해결하는 방법](https://github.com/radix-ui/primitives/issues/1825)도 있었습니다.  
+분명히 저와 비슷한 고민을 한 사람이 있을 거로 생각해서 이슈를 좀 찾아봤는데, 이미 [논의가 이루어졌고, 해결하는 방법🔗](https://github.com/radix-ui/primitives/issues/1825)도 있었습니다.  
 
 
 ```tsx
@@ -219,7 +221,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
 이렇게 `cloneElement`를 사용해서 원하는 태그를 사용할 수 있습니다.  
 다만, 이 방법은 `NewSlottable`의 복잡도가 높아 유지보수가 어렵고, 성능 문제도 있습니다.  
-일단 `isValidElement`, `cloneElement`를 사용해야 하고, 렌더링마다 새로운 함수를 생성하기 때문이죠.  
+`isValidElement`, `cloneElement`를 사용해야 하고, 렌더링마다 새로운 함수를 생성하기 때문이죠.  
 
 그럼 더 나은 방법은 없을까요?
 
@@ -227,7 +229,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
 # Polymorphic Components
 
-네, `as` prop을 사용하는 방법이 있습니다.  
+`as` prop을 사용하는 방법이 있습니다.  
+
 아마 이 방식이 더 유명할 것 같아요.  
 개인적으로 사용법이 직관적이고 쉽다고 생각해요.  
 
@@ -238,22 +241,18 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 // <a href="/login">Login</a>
 ```
 
-요 `as` prop을 구현하는 방법은 이미 많은 아티클에서 다루고 있어요.  
-이 글에서 자세히 다루지는 않겠습니다.  
+`as` prop을 구현하는 방법은 이미 많은 아티클에서 다루고 있기 때문에 자세히 다루지 않겠습니다.  
 대신 구현 방법을 잘 정리해 둔 아티클 몇 개를 추천하고 넘어갈게요.  
 
-[(한글) Polymorphic한 React 컴포넌트 만들기](https://kciter.so/posts/polymorphic-react-component/)  
-[(한글) Type-Safe하게 다형성 지원하기](https://f-lab.kr/blog/polymorphism-with-type-safe)  
-[(영어) How to Build Strongly Typed Polymorphic Components](https://www.freecodecamp.org/news/build-strongly-typed-polymorphic-components-with-react-and-typescript/)
+[(한글) Polymorphic한 React 컴포넌트 만들기🔗](https://kciter.so/posts/polymorphic-react-component/)  
+[(한글) Type-Safe하게 다형성 지원하기🔗](https://f-lab.kr/blog/polymorphism-with-type-safe)  
+[(영어) How to Build Strongly Typed Polymorphic Components🔗](https://www.freecodecamp.org/news/build-strongly-typed-polymorphic-components-with-react-and-typescript/)
 
 ## 타입 에러 발생
 
-자, 이 글을 쓰게 된 이유예요.  
-
 위에서 추천한 아티클은 모두 비슷한(거의 동일한) 방식으로 `as` prop을 구현하고 있습니다.  
-잘 정리된 글을 따라 구현을 마치면... 타입 에러가 발생합니다 😇  
-
-이제 왜 타입 에러가 발생하는지, 그리고 해결 방법에 대해 알아보겠습니다.  
+잘 정리된 글을 따라 구현해보면... 타입 에러가 발생합니다 😇  
+왜 타입 에러가 발생하는지, 그리고 해결 방법에 대해 알아보겠습니다.  
 
 ### 원인 분석
 
@@ -312,12 +311,13 @@ const Button = forwardRef(
 ```
 
 에러 메시지에서 확인할 수 있듯이 타입 에러는 `ref`의 타입 불일치로 인해 발생합니다.  
-근데, 구현을 따라 해보면 하나도 아니고 모든 아티클에서 동일한 에러가 발생하고 있습니다.  
-대체 사람들은 왜 타입 에러가 발생하는 코드를 아티클로 작성한 걸까요?  
+근데, 하나도 아니고 무슨 아티클을 참고하든 동일한 에러가 발생합니다.  
+사람들은 왜 타입 에러가 발생하는 코드를 아티클로 작성한 걸까요?  
 
-이유는 `@types/react` 18.3.5 버전부터 `forwardRef`의 타입이 변경되었기 때문이에요.  
-아티클은 그 이전에 작성된 것 같습니다.  
+에러가 발생하는 이유는 `@types/react` 18.3.5 버전부터 `forwardRef`의 타입이 변경되었기 때문이에요.  
 실제로 18.3.4 버전을 사용하면 에러 없이 잘 동작하는데, 18.3.5 이상 버전에서는 타입 에러가 발생하는 것을 확인할 수 있어요.  
+아티클은 18.3.5 버전 이전에 작성된 것 같습니다.  
+
 그럼 `forwardRef`의 타입은 어떻게 변경되었을까요?  
 
 ```ts
@@ -333,9 +333,8 @@ function forwardRef<T, P = {}>(
 ```
 
 `ForwardRefRenderFunction`의 두 번째 타입 파라미터가 `P`에서 `PropsWithoutRef<P>`로 변경되면서 문제가 발생했습니다.  
-`ref` 프로퍼티를 props에서 명시적으로 제거하여 타입 안전성을 높이고자 한 것이죠.  
+`PropsWithoutRef`는 뭐 하는 녀석이길래 에러를 발생시키는 걸까요?
 
-그럼 `PropsWithoutRef`가 뭐 하는 녀석이길래 에러를 발생시키는 걸까요?
 
 ```ts
 type PropsWithoutRef<P> =
@@ -345,8 +344,9 @@ type PropsWithoutRef<P> =
 P extends any ? ("ref" extends keyof P ? Omit<P, "ref"> : P) : P;
 ```
 
-즉, 타입 파라미터 `P`에 `ref` 프로퍼티가 있으면 제거하고, 없으면 그대로 유지하는 타입입니다.  
-이런 타입을 [**Distributive Conditional Type**](https://www.typescriptlang.org/docs/handbook/2/conditional-types.html#distributive-conditional-types), 조건부 타입의 분배 법칙이라고 합니다.  
+타입 파라미터 `P`에 `ref` 프로퍼티가 있으면 제거하고, 없으면 그대로 유지하는 타입입니다.  
+`ref` 프로퍼티를 props에서 명시적으로 제거하여 타입 안전성을 높이고자 한 것이죠.  
+그리고 이런 타입을 [**Distributive Conditional Type**🔗](https://www.typescriptlang.org/docs/handbook/2/conditional-types.html#distributive-conditional-types), 조건부 타입의 분배 법칙이라고 합니다.  
 
 조건부 타입의 분배 법칙은 수학에서 배운 분배 법칙과 비슷하다고 생각할 수 있어요.  
 즉, `2 * (3 + 4) = (2 * 3) + (2 * 4)` 요런 것으로 이해하면 됩니다.  
@@ -474,15 +474,15 @@ const Button = forwardRef<SomeRealType, SomeRealProps>(Component)
 
 `forwardRef`가 반환하는 결과인 `Button`은 더 이상 제네릭이 아니게 되는 거죠.  
 직접 지정하지 않아도 호출 시점에 인자 값을 보고 추론해서 어떤 특정 타입으로 결정해 버립니다.  
-따라서 우리가 만든 컴포넌트는 우리가 원하는 제네릭 타입이 아니었던 거죠.  
+따라서 우리가 만든 컴포넌트는 제네릭 타입이 아니었던 거죠.  
 
 ```ts
 // 버튼 컴포넌트의 타입이 어떻게 추론되고 있냐면...  
-(alias) const Button: React.ForwardRefExoticComponent<Omit<Props<React.ElementType>,
+const Button: React.ForwardRefExoticComponent<Omit<Props<React.ElementType>,
 "ref"> & React.RefAttributes<unknown>>
 
 // 우린 이걸 원했는데...
-(alias) const Button: <C extends React.ElementType = "button">(props: 
+const Button: <C extends React.ElementType = "button">(props: 
 React.PropsWithoutRef<Props<C>> & React.RefAttributes<unknown>) => React.ReactNode
 ```
 
@@ -502,6 +502,7 @@ React.PropsWithoutRef<Props<C>> & React.RefAttributes<unknown>) => React.ReactNo
 `forwardRef`를 사용하지 않으면 타입 에러가 발생하지 않습니다.  
 위에서 말했던 것처럼, 이 문제는 `forwardRef`를 사용해서 제네릭이 아니라 특정 타입으로 결정되는 것이 원인이기 때문이에요.  
 따라서 `forwardRef`를 사용하지 않으면 해결입니다.  
+
 해결이라고 볼 수 있을까요?😇
 
 #### 2. 타입 어노테이션을 통해 제네릭으로 만들어주는 방법
@@ -540,20 +541,20 @@ const Button: ButtonType = forwardRef(
 );
 ```
 
-간단하게 해결됩니다!👍
+간단하게 해결됩니다!👍  
 
 
 #### 3. Higher order type inference from generic functions
 
 
-타입스크립트는 3.4 버전부터 [Higher order type inference from generic functions](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#higher-order-type-inference-from-generic-functions)라는 기능을 지원합니다.  
+타입스크립트는 3.4 버전부터 [Higher order type inference from generic functions🔗](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#higher-order-type-inference-from-generic-functions)라는 기능을 지원합니다.  
 
 요것은 **고차함수의 인자가 제네릭 함수일 때, 반환하는 함수도 제네릭 함수가 되게 하는 기능**입니다.  
 그럼 `forwardRef`도 고차함수니까 이 기능이 적용되어서 반환하는 `Button`도 제네릭 함수가 되어야 하지 않냐고요?  
 넵, 그래야 하는데... 왜 안 될까요?  
 
 이 기능을 사용하기 위해서는 **인자 함수와 반환 함수가 모두 '순수한 함수 타입'이어야 하기 때문**입니다.  
-순수한 함수 타입이란, [**단일 호출 시그니처가 있고 다른 멤버가 없는 유형(call signature만 가지고, 다른 필드를 가지지 않는 함수 타입)**](https://github.com/microsoft/TypeScript/issues/30650#issuecomment-478258803)입니다.  
+순수한 함수 타입이란, [**단일 호출 시그니처가 있고 다른 멤버가 없는 유형(call signature만 가지고, 다른 필드를 가지지 않는 함수 타입)**🔗](https://github.com/microsoft/TypeScript/issues/30650#issuecomment-478258803)입니다.  
 `forwardRef`는 인자 함수와 반환 함수가 모두 순수한 함수 타입이 아니라서 안되는 것입니다.  
 
 ```ts
