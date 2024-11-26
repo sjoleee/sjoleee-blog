@@ -1,3 +1,5 @@
+import ScrollToHash from "../ScrollToHash";
+
 import { useMDXComponent } from "next-contentlayer/hooks";
 import Image, { ImageProps } from "next/image";
 
@@ -16,6 +18,7 @@ const Mdx = ({ code, className }: MdxProps) => {
 
   return (
     <article className="prose dark:prose-invert min-w-full break-keep break-words">
+      <ScrollToHash />
       <Component className={className} components={components} />
     </article>
   );
