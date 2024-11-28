@@ -10,7 +10,7 @@ const sitemap = (): MetadataRoute.Sitemap => {
 
   return [
     {
-      url: USER_INFORMATIONS.domain,
+      url: `${USER_INFORMATIONS.domain}/`,
       lastModified: new Date().toISOString().split("T")[0],
       priority: 1,
     },
