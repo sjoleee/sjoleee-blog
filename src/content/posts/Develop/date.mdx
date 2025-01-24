@@ -208,7 +208,7 @@ ISO 8601 표준에서는 **타임존 정보가 없는 날짜/시간 텍스트는
 국제 표준과 반대로 정의했다는 걸 깨닫고, TC39에서는 ES6에서 이를 바로잡아 타임존 정보가 없으면 로컬 타임존으로 해석하도록 스펙을 바꾸었어요. 이 바뀐 스펙이 브라우저에서 구현되자, ES5 시절에 구현된 수많은 사이트에서 수많은 버그가 발생했다고 합니다.  
 결국 브라우저들의 기존 구현과 사용자 피드백을 종합해서 ISO 8601 표준과는 다르지만, 기존 호환성을 살리는 방향으로 절충해서 지금과 같은 스펙이 되었다고 하네요.
 
-참고: [tc39/ecma262: Date Time String Format: default time zone difference from ES5 not web-compatible](https://github.com/tc39/ecma262/issues/87)
+참고: [tc39/ecma262 - Date Time String Format: default time zone difference from ES5 not web-compatible](https://github.com/tc39/ecma262/issues/87)
 
 이렇게 이미 의존하고 있는 코드들이 너무 많은 Date 객체는 API를 Breaking Change를 발생시키기 어려워 새로운 날짜/시간을 다루는 타입으로 Temporal API라는 새로운 스펙을 준비하고 있다고 합니다.
 
