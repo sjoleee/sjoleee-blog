@@ -202,7 +202,7 @@ const dateWithTime = new Date("2025-01-13T00:00:00")
 
 ISO 8601 표준에서는 **타임존 정보가 없는 날짜/시간 텍스트는 로컬 타임으로 해석**한다고 명시하고 있습니다. 그런데 ES5 시절 ECMAScript 스펙에서는 반대로 **타임존 정보가 없을 때 UTC로 해석**하도록 스펙을 정의했다고 해요. 그러니까, 반대로 구현해 버린 것이죠.
 
-참고: [MDN - Date.parse](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/parse#using_date.parse)
+참고: [MDN - Date.parse](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/parse#using_date.parse)  
 참고: [Wikipedia - ISO 8601](https://en.wikipedia.org/wiki/ISO_8601#:~:text=if%20no%20utc%20relation%20information%20is%20given%20with%20a%20time%20representation%2C%20the%20time%20is%20assumed%20to%20be%20in%20local%20time.%20)
 
 국제 표준과 반대로 정의했다는 걸 깨닫고, TC39에서는 ES6에서 이를 바로잡아 타임존 정보가 없으면 로컬 타임존으로 해석하도록 스펙을 바꾸었어요. 이 바뀐 스펙이 브라우저에서 구현되자, ES5 시절에 구현된 수많은 사이트에서 수많은 버그가 발생했다고 합니다.  
