@@ -1,0 +1,680 @@
+---
+title: 서버에서 내려주는 데이터를 얼마나 신뢰할 수 있을까요?
+description: 런타임에 서버 데이터를 검증하는 시스템 구축하기
+date: "2025-03-02"
+keywords: [promise,safe,zod,standardSchema,schema,duck type,typescript]
+thumbnail: "/images/posts/Develop/promi-safe/thumbnail.png"
+---
+
+# 현실에서의 문제
+
+서버에서 내려주는 데이터를 얼마나 신뢰할 수 있을까요?  
+
+저는 클라이언트에서 정의해 둔 타입과 서버에서 내려준 데이터가 다른 경우를 종종 겪었는데요,  
+있어야 하는 속성이 없거나, 없어야 하는 속성이 있거나, `number`로 내려주는 줄 알았는데 실제로는 `string`인 등...  
+
+이런 문제는 서버와 클라이언트 간 의사소통 비용을 증가시킬 뿐 아니라, 런타임에서 예측할 수 없는 에러를 발생시킬 수 있습니다.  
+
+## 타입 불일치가 발생하는 대표적인 케이스
+
+### 1. 있어야 하는 속성이 없는 경우
+```tsx
+// 클라이언트에서 정의한 타입
+interface User {
+  id: number;
+  name: string;
+  profileImage: string; // 클라이언트는 이 속성이 있다고 가정
+}
+
+// 실제 API 응답
+// { id: 1, name: "홍길동" } - profileImage 속성 없음
+
+function renderUserProfile(user: User) {
+  // 여기서 TypeError: Cannot read properties of undefined (reading 'includes') 발생
+  if (user.profileImage.includes('https')) {
+    return `<img src="${user.profileImage}" alt="${user.name}" />`;
+  }
+  return `<img src="https://${user.profileImage}" alt="${user.name}" />`;
+}
+```
+
+### 2. 없어야 하는 속성이 있는 경우
+```tsx
+// 클라이언트에서 정의한 타입
+interface MenuItem {
+  id: number;
+  name: string;
+  url: string;
+}
+
+// 실제 API 응답
+// [
+//   { id: 1, name: "홈", url: "/", isDefault: true, icon: "home" },
+//   { id: 2, name: "상품", url: "/products", isVisible: false, icon: "shopping" }
+// ]
+
+function renderMenu(items: MenuItem[]) {
+  return (
+    <ul>
+      {items.map(item => (
+        <li key={item.id}>
+          {/* Object.entries로 모든 프로퍼티를 순회하면 예상치 못한 속성까지 화면에 렌더링됨 */}
+          {Object.entries(item).map(([key, value]) => (
+            <span key={key}>{key}: {value.toString()}</span>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### 3. 기대와 다른 타입인 경우
+```tsx
+// 클라이언트에서 정의한 타입
+interface Product {
+  id: number;
+  price: number; // 숫자로 기대
+  quantity: number;
+}
+
+// 실제 API 응답
+// { id: 1, price: "1000", quantity: 2 } - price가 문자열로 옴
+
+function calculateTotal(products: Product[]) {
+  return products.reduce((total, product) => {
+    // price가 문자열이므로 예상치 못한 결과가 발생
+    // "1000" + 0 = "1000" (숫자 덧셈이 아닌 문자열 연결 발생)
+    return total + product.price * product.quantity;
+  }, 0);
+}
+```
+
+위 사례들에서 볼 수 있듯이, 서버와 클라이언트의 타입이 일치하지 않는다면 앱의 신뢰도를 떨어뜨릴 수 있습니다.  
+따라서 오늘은 **런타임 타입 검증**을 통해 서버-클라이언트 간 타입 불일치 문제를 보완하는 방법에 대해 이야기해 보겠습니다.  
+
+---
+
+# 런타임 타입 검증 구현하기
+
+## 문제가 있는 일반적인 패턴
+
+먼저 흔히 볼 수 있는 API 호출 패턴을 살펴보겠습니다.
+
+```tsx
+import { useSuspenseQuery } from '@tanstack/react-query';
+
+interface User {
+  id: number;
+  name: string;
+  profileImage: string;
+}
+
+// 데이터 페칭 로직
+const fetchUserData = async (userId: number): Promise<User> => {
+  const response = await fetch(`/api/users/${userId}`);
+  const data = await response.json();
+
+  return data;
+};
+
+const UserProfile = ({ userId }: { userId: number }) => {
+  const { data: user } = useSuspenseQuery({
+    queryKey: ['user', userId],
+    queryFn: () => fetchUserData(userId),
+  });
+
+  return <UserProfileCard user={user} />;
+};
+```
+
+위 코드는 서버로부터 받은 `data`가 `User` 타입에 맞는지 전혀 확인하지 않고 그대로 사용하고 있어요.    
+타입 불일치가 발생하더라도 컴파일 에러는 없으며, 오직 런타임에서만 문제가 드러납니다.  
+
+이제 단계적으로 이 문제를 해결해보겠습니다.  
+
+## 단계 1: Zod 스키마를 사용한 기본 검증
+
+첫 번째 단계는 [Zod](https://github.com/colinhacks/zod) 같은 런타임 타입 검증 라이브러리를 도입하는 것입니다.
+
+```tsx
+import { useSuspenseQuery } from '@tanstack/react-query';
+import { z } from 'zod';
+
+// Zod 스키마 정의
+const UserSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  profileImage: z.string(),
+});
+
+// 스키마에서 타입 유추
+type User = z.infer<typeof UserSchema>;
+
+// 데이터 페칭 로직
+const fetchUserData = async (userId: number): Promise<User> => {
+  const response = await fetch(`/api/users/${userId}`);
+  const data = await response.json();
+
+  // Zod 스키마를 사용해 데이터 검증
+  return UserSchema.parse(data);
+};
+
+const UserProfile = ({ userId }: { userId: number }) => {
+  const { data: user } = useSuspenseQuery({
+    queryKey: ['user', userId],
+    queryFn: () => fetchUserData(userId),
+  });
+
+  return <UserProfileCard user={user} />;
+};
+```
+
+이제 서버에서 받은 데이터가 `UserSchema`에 맞지 않으면 Zod가 에러를 발생시킵니다.  
+이로써 런타임에서 타입 불일치를 즉시 발견할 수 있게 되었네요.  
+다만, `fetchUser`가 페칭과 검증의 두 역할을 하고 있다는 점이 다소 아쉽습니다.  
+
+- **이 단계의 개선점**: 런타임 타입 검증 도입
+- **남은 문제점**: `fetchUserData`가 데이터 페칭과 검증이라는 두 가지 책임을 가짐
+
+## 단계 2: 단일 책임 원칙 적용하기
+
+`fetchUserData` 함수는 현재 두 가지 책임을 갖고 있습니다
+1. 서버에서 데이터 가져오기  
+2. 데이터 검증하기 
+
+단일 책임 원칙(SRP)에 따라 이 두 책임을 분리해 볼게요.  
+
+```tsx
+// 데이터 가져오기만 담당하는 함수
+const fetchUserData = async (userId: number): Promise<unknown> => {
+  const response = await fetch(`/api/users/${userId}`);
+  const data = await response.json();
+
+  return data;
+};
+
+// 데이터 검증만 담당하는 함수
+const validateUser = (data: unknown): User => {
+  return UserSchema.parse(data);
+};
+
+// 두 기능을 조합하는 함수
+const fetchUser = async (userId: number): Promise<User> => {
+  const data = await fetchUserData(userId);
+  return validateUser(data);
+};
+```
+
+이제 책임이 분리되었네요. 테스트 용이성이 매우 향상되었습니다.  
+이전 코드에서는 검증하는 부분을 테스트하기 위해서는 데이터 페칭이 필요했지만, 이제는 네트워크 의존성을 격리하고 스텁 객체로 테스트할 수 있게 되었습니다.  
+
+그러나 실제 서비스에서는 수많은 API가 존재하고, 그에 맞는 수많은 데이터 타입이 있을 거에요.  
+그렇다면 `validateUser` 같이 데이터를 검증하는 함수가 수십개 생기겠죠?  
+따라서 `validateUser` 대신 보편적으로 사용할 수 있는 함수가 있다면 좋을 것 같습니다.  
+
+- **이 단계의 개선점**: 단일 책임 원칙 적용
+- **남은 문제점**: 도메인마다 검증 함수를 만들어야 한다는 중복 발생 가능성
+
+## 단계 3: 검증 함수 추상화하기
+
+지금까지는 `User` 타입에 특화된 검증 함수를 만들었습니다.  
+하지만 실제 애플리케이션에서는 수많은 데이터 타입이 있고, 각각에 대해 검증 함수를 만드는 것은 비효율적이에요.  
+일반화된 검증 함수를 만들어 보겠습니다.
+
+```tsx
+import { z } from 'zod';
+
+/**
+ * 범용 데이터 검증 함수
+ * @param schema 검증에 사용할 Zod 스키마
+ * @param data 검증할 데이터
+ * @returns 검증된 데이터 (타입 안전)
+ */
+function validate<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
+  return schema.parse(data);
+}
+
+async function fetchUser(userId: number): Promise<User> {
+  const data = await fetchUserData(userId);
+  return validate(UserSchema, data);
+}
+```
+
+이제 `validate`는 `User`라는 특정 도메인과 관련 없이, 단순히 스키마와 데이터를 검증하는 유틸 함수로 추상화되었습니다.  
+필요한 곳에서 그냥 스키마와 데이터를 넘겨버리면 되는 거죠.  
+
+근데, 함수 내부에서 `schema.parse`만 할 건데 왜 굳이 분리했냐고 생각할 수도 있겠네요.  
+다소 과잉 추상화라고 느껴질 수 있지만, 추상화 계층을 적용함으로써 추후 Zod가 아닌 다른 라이브러리를 사용하게 되었을 때 `validate`만 수정하도록 변경 범위를 최소화할 수 있습니다.  
+그리고 확장 가능성이 향상됩니다. 추후 로깅을 해야 한다거나, 오류를 발생시켜야 하는 등 다양한 요구 사항을 쉽게 적용할 수 있겠죠.  
+또한, 단위 테스트를 도메인별로 작성할 필요가 없습니다.  
+
+하지만, 이런 상황을 생각해 볼게요.  
+마이 페이지에서는 User 데이터의 `id`, `name`, `profileImage` 모두 필요합니다. 그래야만 UI를 그릴 수 있어요.  
+하지만 메인 페이지에서는 단순히 `name`만 `string`으로 잘 내려오면 UI를 그리는 데 문제가 없습니다.  
+그런데, 현재 `fetchUser`는 `name`이 `string`으로 잘 내려와도 다른 속성이 문제가 될 경우 에러를 던집니다.  
+유저는 메인 페이지에서 불필요하게 `ErrorFallback`을 봐야만 할거에요.
+
+- **이 단계의 개선점**: 검증 로직 추상화로 중복 제거
+- **남은 문제점**: 상황별로 유연한 검증 전략 필요
+
+## 단계 4: 상황별 유연한 검증 전략
+
+다양한 상황에서 그에 맞는 검증을 위해서는 그만큼 스키마를 작성해야 할 것 같네요.  
+
+```tsx
+import { z } from 'zod';
+
+// 다양한 수준의 스키마 정의
+const UserIdSchema = z.object({ 
+  id: z.number() 
+});
+
+const UserBasicSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+});
+
+const UserCompleteSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  profileImage: z.string()
+});
+
+type UserId = z.infer<typeof UserIdSchema>;
+type UserBasic = z.infer<typeof UserBasicSchema>;
+type UserComplete = z.infer<typeof UserCompleteSchema>;
+
+// 상황에 맞게 다른 스키마 사용
+async function fetchUserMinimal(userId: number): Promise<UserId> {
+  const data = await fetchUserData(userId);
+  return validate(UserIdSchema, data);
+}
+
+async function fetchUserBasic(userId: number): Promise<UserBasic> {
+  const data = await fetchUserData(userId);
+  return validate(UserBasicSchema, data);
+}
+
+async function fetchUserComplete(userId: number): Promise<UserComplete> {
+  const data = await fetchUserData(userId);
+  return validate(UserCompleteSchema, data);
+}
+```
+
+이제 필요한 데이터의 수준에 따라 다른 함수를 호출할 수 있습니다.  
+그러나 이 방식은 많은 중복 코드를 생성합니다. 아까 봤던 `validateUser` 함수와 유사한 문제인 것 같네요.  
+
+- **이 단계의 개선점**: 상황별 유연한 검증 전략 도입
+- **남은 문제점**: 상황마다 함수를 만들어야 하는 중복 발생
+
+## 단계 5: 제네릭 함수로 중복 제거하기
+
+이제 제네릭 함수를 활용해 중복 문제를 해결해 볼게요.  
+
+```tsx
+/**
+ * 제네릭 사용자 데이터 가져오기 함수
+ * @param userId 사용자 ID
+ * @param schema 적용할 Zod 스키마
+ * @returns 검증된 사용자 데이터
+ */
+async function fetchUser<T extends z.ZodType>(
+  userId: number, 
+  schema: T
+): Promise<z.infer<T>> {
+  const data = await fetchUserData(userId);
+  return validate(schema, data);
+}
+
+// 컴포넌트에서 사용 예시
+function UserListItem({ userId }: { userId: number }) {
+  // 필요한 스키마만 전달
+  const { data: user } = useSuspenseQuery({
+    queryKey: ['user', userId, 'id-only'],
+    queryFn: () => fetchUser(userId, UserIdSchema),
+  });
+  
+  return <div>사용자 #{user.id}</div>;
+}
+```
+
+이제 호출 시점에 필요한 스키마를 전달하는 방식으로 추상화하여 중복을 줄였어요.  
+
+이제 거의 다 온 것 같은데요, 사실 우리는 `User`라는 도메인 하나에 대해서만 검증하고 싶은 것이 아닙니다.  
+도메인과 무관하게 모든 API 호출 함수에 검증 기능을 추가하고 싶은 건데요, 그렇다면 `fetchUser`와 같이 `fetchProducts`, `fetchMenus` 등을 계속 만들어야 할까요?  
+물론 아닙니다. 단계 3에서 `validateUser`를 추상화한 `validate` 함수를 만든 것처럼, 이번에도 추상화해볼게요.  
+
+- **이 단계의 개선점**: 제네릭 함수로 유연성 개선
+- **남은 문제점**: 모든 도메인에 적용 가능한 솔루션 부재
+
+## 단계 6: HTTP 클라이언트에 검증 통합하기
+
+우리는 `validateUser`에서 `validate`를 추상화했습니다.  
+그럼 `fetchUser`에서는 `fetch`를 추상화해보면 어떨까요?  
+
+그런데 많은 팀에서는 이미 fetch 로직을 추상화해서 사용하고 있을 겁니다.  
+대부분 baseURL을 비롯한 옵션을 공통으로 사용하기 위해 HTTP 클라이언트를 추상화하기 때문이죠.  
+
+위 시나리오대로 HTTP 클라이언트가 이미 존재한다고 생각하고, 거기에 검증 로직을 통합해볼게요.  
+그리고 HTTP 클라이언트는 아주 대중적으로 사용되는 axios 기반으로 만들어져 있다고 생각해볼게요.
+
+```tsx
+import axios from 'axios';
+import { z } from 'zod';
+
+// axios 인스턴스
+const axiosInstance = axios.create({
+  baseURL: 'https://api.example.com'
+});
+
+/**
+ * 범용 데이터 검증 함수
+ */
+function validate<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
+  return schema.parse(data);
+}
+
+// 핵심 요청 함수
+async function request<T extends z.ZodType>(
+  url: string,
+  method: string, 
+  data?: Record<string, unknown>,
+  schema: T
+): Promise<z.infer<T>> {
+  const response = await axiosInstance({ url, method, data });
+  return validate(schema, response.data);
+}
+
+// 단순화된 HTTP 클라이언트
+export const httpClient = {
+  get: <T extends z.ZodType>(url: string, schema: T) => 
+    request(url, 'get', undefined, schema),
+    
+  post: <T extends z.ZodType>(url: string, data: Record<string, unknown>, schema: T) => 
+    request(url, 'post', data, schema),
+    
+  put: <T extends z.ZodType>(url: string, data: Record<string, unknown>, schema: T) => 
+    request(url, 'put', data, schema),
+    
+  delete: <T extends z.ZodType>(url: string, schema: T) => 
+    request(url, 'delete', undefined, schema)
+};
+```
+
+이제 `httpClient`를 사용하면 모든 API 요청에 자동으로 타입 검증이 적용됩니다.
+
+```tsx
+// 사용 예시
+const user = await httpClient.get('/users/1', UserSchema);
+```
+
+- **이 단계의 개선점**: 모든 API 요청에 일관된 검증 적용
+
+
+## 선택적 스키마 지원하기
+
+하지만 모든 API 요청에서 반드시 스키마를 주입해서 검증해야 할 필요는 없을 것 같아요.  
+스키마를 선택적으로 사용할 수 있도록 개선해보겠습니다.
+
+```tsx
+// 범용 데이터 검증 함수
+function validate<T>(schema: z.ZodType<T>, data: unknown): unknown {
+  // 검증만 수행 (실패 시 에러 발생)
+  schema.parse(data);
+  // 검증 성공 시 원본 데이터 그대로 반환
+  return data;
+}
+
+// 핵심 요청 함수
+async function request<T>(
+  url: string,
+  method: string, 
+  data?: Record<string, unknown>,
+  schema?: z.ZodType<T>
+): Promise<unknown> {
+  const response = await axiosInstance({ url, method, data });
+  
+  // 스키마가 있으면 검증만 수행
+  if (schema) {
+    validate(schema, response.data);
+  }
+  
+  // 검증 여부와 상관없이 항상 response.data 반환
+  return response.data;
+}
+
+// HTTP 클라이언트는 동일
+...
+```
+
+자, HTTP 클라이언트에 `validate`를 적용함으로써 모든 API 요청 함수에서 데이터 검증 기능을 사용할 수 있게 되었습니다.  
+
+하지만 여전히 문제가 남아있습니다.  
+- 3단계에서 `validate`를 추상화했지만, 주입되는 스키마 자체가 Zod 의존적입니다. 다른 검증 라이브러리로 교체할 경우 모든 스키마를 수정해야 합니다. 변경점을 최소화할 수는 없을까요?
+- 검증이 실패할 경우 무조건 에러를 던져야만 하나요?
+
+아직 갈 길이 멀었네요. 여기까지 읽으신 분들은 제가 어떤 코드를 작성하려 하는지 이해하셨을 것 같아요.
+- 잘 추상화되어 사용이 편리하고,
+- 특정 라이브러리에 의존하지 않고,
+- 선택적인 검증이 가능하며,
+- 검증 후 동작을 커스텀할 수 있고,
+- API 요청과는 관심사가 분리되어 있어야 합니다.
+
+제가 남은 문제를 어떻게 해결했는지는 [promi-safe](https://github.com/sjoleee/promi-safe) 라이브러리에서 확인하실 수 있습니다.  
+
+---
+
+# [promi-safe](https://github.com/sjoleee/promi-safe)
+
+앞서 단계적으로 살펴본 고민과 해결 과정을 토대로 promi-safe라는 라이브러리를 만들었습니다.  
+
+## 라이브러리 설계 원칙
+
+promi-safe 개발에서 가장 중점을 둔 원칙은 **관심사의 분리**, **유연성**입니다.  
+이전 접근법들의 한계점이었던 '데이터 페칭'과 '타입 검증'의 책임 분리를 명확히 구현하고자 했어요.  
+
+핵심적인 통찰은 모든 비동기 API 요청의 근본적인 공통점을 파악한 것에서 시작되었습니다.  
+개발자마다 선호하는 HTTP 클라이언트는 다양합니다.  
+fetch API를 직접 사용하는 경우, axios나 ky와 같은 라이브러리를 활용하는 경우 등 구현 방식은 상이하지만, 이들은 모두 **Promise 객체를 반환한다**는 본질적인 특성을 공유합니다.  
+이 특성에 주목하여, Promise 자체를 확장함으로써 라이브러리 의존성 없이 타입 검증 기능을 제공할 수 있는 방법을 고안하게 되었어요.
+
+## 기술적 구현
+
+promi-safe는 Promise 객체를 래핑하여 `safe` 메서드를 추가하는 방식으로 구현되었습니다.  
+이 메서드는 Promise가 resolve될 때 반환되는 데이터가 주입된 스키마를 충족하는지 검증합니다.
+
+```ts
+import { makeSafePromise } from "promi-safe";
+import { z } from "zod";
+
+// 기존 Promise를 래핑하여 safe 메서드 추가
+const apiResponse = fetch("/api/users").then(res => res.json());
+const safeApiResponse = makeSafePromise(apiResponse);
+
+// 스키마를 통한 응답 데이터 검증
+const userSchema = z.object({ id: z.string() });
+const validatedData = await safeApiResponse.safe(userSchema);
+```
+
+이렇게 사용하면 타입 검증 계층을 효과적으로 추가할 수 있다는 장점이 있습니다.  
+기존 Promise 객체를 `makeSafePromise` 함수로 래핑하면, 필요한 시점에 `safe` 메서드를 통해 스키마 검증을 적용할 수 있게 되죠.  
+
+추상화된 HTTP 클라이언트에 통합하면 더욱 간결하게 사용할 수 있습니다.
+
+```ts
+export const httpClient = {
+  get: <T extends z.ZodType>(url: string) => 
+    makeSafePromise(axios.get(url).then(res => res.data)),
+  ...
+};
+
+const schema = z.object({ id: z.string() });
+const response = await httpClient.get("/api/users").safe(schema);
+```
+
+검증하고 싶지 않다면? `safe`를 사용하지 않으면 그만입니다.  
+
+## StandardSchema
+
+타입 검증 라이브러리 의존성 문제는 [StandardSchema](https://github.com/standard-schema/standard-schema)를 통해 해결했습니다.  
+StandardSchema는 Zod, Yup, ArkType 등 주요 런타임 타입 검증 라이브러리들의 메인테이너들이 협력하여 개발한 표준 인터페이스입니다.  
+이는 다양한 검증 라이브러리 간의 상호 운용성을 보장합니다.
+
+promi-safe는 특정 검증 라이브러리가 아닌 StandardSchema 인터페이스에만 의존하므로, 개발자는 자신이 선호하는 검증 라이브러리를 자유롭게 선택할 수 있습니다.
+
+```ts
+// StandardSchema 인터페이스를 활용한 검증 로직
+export const validateResponse =
+  <T>(promise: Promise<T>) =>
+  async (schema: StandardSchemaV1, options?: Options) => {
+    const response = await promise;
+    // 표준화된 인터페이스를 통한 검증
+    const result = schema["~standard"]["validate"](response);
+    const awaitedResult = await Promise.resolve(result);
+
+    // 검증 결과 처리 로직
+    // ...
+  };
+```
+
+초기에는 각 검증 라이브러리마다 개별 어댑터를 구현하는 방식을 고려했지만, 유지보수 측면에서 비효율적이기도 하고, 제가 모든 라이브러리를 살펴보고 구현하기에도 불편한 점이 있었습니다.  
+어디선가 들어본 StandardSchema를 도입함으로써 단일 인터페이스로 다양한 라이브러리를 지원할 수 있게 되었어요.  
+
+## 유연한 오류 처리 전략
+
+검증 실패 시 항상 예외를 발생시키는 대신, promi-safe는 유연한 오류 처리 옵션을 제공합니다.  
+StandardSchema의 응답 형식을 보면, `validate`는 검증에 실패할 경우 `issues`를 포함하는 객체를 반환합니다. 반대로 검증에 성공하면 `issues`가 없는 구분된 유니온입니다.  
+즉, 따로 에러를 던지지는 않습니다.  
+
+```ts
+export const validateResponse =
+  <T>(promise: Promise<T>) =>
+  async (schema: StandardSchemaV1, options?: Options) => {
+    // ... 검증 로직 ...
+
+    const _options: Options = {
+      throwOnError: options?.throwOnError ?? true,
+      onFail: options?.onFail,
+    };
+
+    if (awaitedResult.issues) {
+      // 선택적 콜백 함수 실행
+      _options.onFail?.(awaitedResult.issues);
+      
+      // 옵션에 따라 예외 발생 여부 결정
+      if (_options.throwOnError) {
+        throw new ValidationError(awaitedResult.issues);
+      }
+    }
+
+    return response;
+  };
+```
+
+페이지 최상위 레벨에서 API 호출 및 검증이 이루어지고, 그 데이터가 여러 하위 컴포넌트에서 사용되는 경우, 일부 데이터의 검증 실패가 전체 페이지 렌더링에 영향을 미치지 않도록 할 수 있습니다.  
+검증 시 서비스 이용에 필요한 영역이 제대로 동작할 수 없는 문제가 발생했을 때가 아니라면 굳이 터트릴 필요는 없다고 생각해요.  
+일부 데이터가 검증에 실패해도 나머지 유효한 데이터를 통해 일부라도 보여주는 전략을 사용할 수 있을 것 같아요.  
+대신 `onFail` 콜백을 통해 로깅을 수행하거나 사용자에게 적절한 피드백을 제공할 수 있습니다.
+
+이렇게 유연한 오류 처리는 개발자가 애플리케이션의 요구사항과 상황에 맞게 타입 안전성과 사용자 경험 사이의 균형을 조정할 수 있게 해줍니다.  
+
+---
+
+# 구조적 타이핑
+
+promi-safe를 구현하며 발견한 흥미로운 점은 Zod, Yup, ArkType 등 주요 런타임 타입 체크 라이브러리들이 모두 타입스크립트의 '구조적 타이핑'이라는 철학을 따른다는 사실이에요.  
+
+## 구조적 타이핑이란?
+
+구조적 타이핑(Structural Typing)은 타입스크립트가 채택한 타입 시스템의 핵심 개념으로, 객체의 이름이나 출처가 아닌 실제 구조와 내용에 기반하여 타입을 판단하는 방식입니다.  
+이는 종종 '덕 타이핑(Duck Typing)'이라고도 불리는데요, 이 용어는 "만약 어떤 새가 오리처럼 걷고, 오리처럼 꽥꽥거리고, 오리처럼 수영한다면, 그것은 아마도 오리일 것이다"라는 유명한 표현에서 유래되었습니다.  
+
+쉽게 풀어서 설명하자면, 객체가 특정 인터페이스에서 요구하는 속성을 모두 가지고 있다면, 그 객체는 명시적으로 해당 인터페이스를 구현한다고 선언하지 않았더라도 해당 인터페이스의 인스턴스로 취급된다는 것이죠.  
+간단한 예시로 살펴볼게요.  
+
+```ts
+// 슈퍼타입 - 기본적인 새의 특성
+interface Bird {
+  canFly: boolean;
+}
+
+// 서브타입 - 오리는 새의 모든 특성을 가지고 추가 특성도 있음
+const duck = {
+  canFly: true,
+  canSwim: true
+};
+
+// Bird 타입을 받는 함수
+function isBird(animal: Bird) {
+  return animal.canFly !== undefined;
+}
+
+// duck은 Bird가 요구하는 canFly 속성을 가지고 있으므로
+// Bird 타입을 요구하는 함수에 전달될 수 있음
+console.log(isBird(duck)); // true 출력
+```
+
+위 예시에서 `duck` 객체는 `Bird` 인터페이스가 요구하는 `canFly` 속성을 가지고 있기 때문에 `Bird` 타입으로 취급됩니다. 추가 속성인 `canSwim`이 있어도 문제가 되지 않습니다.  
+이것이 **'오리처럼 생겼다면, 그것은 오리로 간주한다'**는 구조적 타이핑의 핵심입니다.  
+
+## 런타임 타입 검증과 구조적 타이핑의 만남
+
+앞서 언급된 Zod, StandardSchema, Yup 같은 런타임 타입 검증 라이브러리들도 이러한 구조적 타이핑 원칙을 그대로 따르고 있습니다.  
+이러한 특성 덕분에 4단계에서 고민했던 "상황별 유연한 검증 전략" 문제를 아주 간단하게 해결할 수 있었어요.  
+전체 User 객체에서 일부 속성만 필요한 상황이라면, 그저 필요한 속성들만 포함한 스키마를 정의하여 검증하면 됩니다.  
+
+```ts
+// 메인 페이지에서는 이름만 필요한 경우
+const UserNameSchema = z.object({
+  name: z.string()
+});
+
+// 프로필 페이지에서는 더 많은 정보가 필요한 경우
+const UserProfileSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  profileImage: z.string()
+});
+
+// 상세 페이지에서는 모든 정보가 필요한 경우
+const UserDetailSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  profileImage: z.string(),
+  lastLogin: z.string(),
+  preferences: z.object({
+    darkMode: z.boolean(),
+    language: z.string()
+  }),
+  friends: z.array(z.number())
+});
+
+// 각 페이지에 필요한 데이터만 정확히 검증하면서
+// 동일한 API 응답을 재사용할 수 있습니다
+const mainPageUser = await httpClient.get('/users/1').safe(UserNameSchema); // 검증 성공!
+const profilePageUser = await httpClient.get('/users/1').safe(UserProfileSchema); // 검증 성공!
+const detailPageUser = await httpClient.get('/users/1').safe(UserDetailSchema); // 검증 성공!
+```
+
+promi-safe 라이브러리를 설계할 때 구조적 타이핑을 충분히 활용함으로써, 다양한 상황과 요구사항에 유연하게 대응할 수 있는 타입 검증 시스템을 구축할 수 있었습니다.  
+
+---
+
+# 결론
+
+여기까지, 클라이언트와 서버 간의 타입 불일치 문제를 해결하기 위한 여정을 살펴보았어요.  
+이 과정에서 알게된 것들을 정리해보면 다음과 같습니다.  
+
+- **타입스크립트만으로는 충분하지 않다**
+  - 타입스크립트의 정적 타입 검사는 컴파일 타임에만 작동하며, 런타임에 실제로 받는 데이터의 형태를 보장하지 않습니다.  
+- **관심사를 잘 분리하자**
+  - 데이터 페칭과 검증은 서로 다른 책임으로, 이를 분리함으로써 코드의 테스트 용이성과 유지보수성이 향상됩니다.
+- **표준화된 인터페이스는 많은 것을 이롭게 한다**
+  - StandardSchema와 같은 표준 인터페이스는 생태계 전반의 상호 운용성을 크게 향상시킵니다.
+
+타입 검증 시스템은 개발자 경험을 향상시키고 애플리케이션의 안정성을 높이며, 예측 가능한 동작을 보장하는 중요한 요소입니다.  
+여러분의 프로젝트에서도 이러한 접근 방식을 도입하여(promi-safe...) 더욱 안정적인 서비스를 만들어보는 것은 어떨까요?  
+
+(여담인데... 사실 Swagger를 사용한다면 OAS를 통한 자동 타입 생성이 가능하기 때문에 이렇게까지 할 필요는 없을지도 모르겠습니다...  
+저희 회사는 google Docs로 서버 스펙을 공유받는 상황이라 클라이언트단에서 구축할 수 있는 최소한의 안전 장치가 필요했답니다🥲)
