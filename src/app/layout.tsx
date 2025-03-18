@@ -4,6 +4,7 @@ import { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { USER_INFORMATIONS } from "@/constants/data";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   metadataBase: new URL(USER_INFORMATIONS.domain),
@@ -34,7 +35,10 @@ const RootLayout = ({
     <html lang="ko" className={`${pretendard.variable} bg-backgroundHeavy`} data-theme="light">
       <FramerLazyMotion>
         <ThemeProvider>
-          <body className="relative antialiased">{children}</body>
+          <body className="relative antialiased">
+            {children}
+            <Analytics />
+          </body>
         </ThemeProvider>
       </FramerLazyMotion>
     </html>
