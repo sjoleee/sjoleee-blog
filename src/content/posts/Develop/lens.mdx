@@ -1,0 +1,795 @@
+---
+title: 렌즈로 불변성을 지키며 복잡한 객체 다루기
+description: 복잡한 구조의 객체를 선언적으로 다루는 방법을 알아봐요
+date: "2025-03-18"
+keywords: [객체,lens,불변성,렌즈,lens.ts]
+# thumbnail: "/images/posts/Develop/lens/thumbnail.png"
+---
+
+# 현실에서의 문제
+
+개발하다 보면 복잡하게 생긴 객체를 다뤄야 하는 경우가 있습니다. 예를 들어, 학생 정보를 담은 객체가 있고, 그 중에서 특정 속성만 수정해야 한다고 해볼게요.
+
+```tsx
+interface Student {
+  name: string;
+  age: number;
+  address: {
+    city: string;
+  };
+  education: {
+    elementary: string;
+    middle: string;
+    high: {
+      name: string;
+      major: string;
+    };
+    university: {
+      name: string;
+      major: string;
+    };
+  };
+}
+
+const student: Student = {
+  name: "신짱구",
+  age: 10,
+  address: {
+    city: "Seoul",
+  },
+  education: {
+    elementary: "떡잎초등학교",
+    middle: "떡잎중학교",
+    high: {
+      name: "떡잎고등학교",
+      major: "문과",
+    },
+    university: {
+      name: "떡잎대학교",
+      major: "일본어학과",
+    },
+  },
+};
+
+// 대학 전공과 고등학교 문/이과를 변경한 새운 객체
+const updatedStudent = {
+  ...student,
+  education: {
+    ...student.education,
+    high: {
+      ...student.education.high,
+      major: "이과",
+    },
+    university: {
+      ...student.education.university,
+      major: "컴퓨터공학과",
+    },
+  },
+};
+```
+
+불변성을 지키기 위해서는 이렇게 속성을 복사하고 수정할 속성만 오버라이딩 해야 합니다. 객체의 구조가 복잡할수록 코드는 더욱 복잡해지고, 휴먼 에러가 발생할 가능성이 높아지겠죠. 이 문제를 더 우아하게 해결할 방법은 없을까요?🤔
+
+---
+
+# 범주론이란?
+
+갑자기 왜 범주론이라는 이야기를 꺼내냐면, 이 글에서 설명할 렌즈라는 개념이 범주론과 연결되어 있기 때문입니다. 범주론은 수학의 한 분야로, **물건**들과 그 물건들 사이의 **관계**를 연구하는 학문입니다. 예를 들어, 다음과 같은 물건들과 관계가 있다고 생각해볼게요.
+
+```
+물건: 서울, 부산, 대구, ...
+관계: 서울에서 대구로 가는 도로, 대구에서 부산으로 가는 도로, ...
+```
+
+이런 물건들과 관계들의 모음을 범주라고 부릅니다. 범주론의 핵심 개념은 다음과 같습니다.
+
+- **곱**: 물건들로 새로운 물건을 만드는 것입니다. 예를 들어 과일(사과, 바나나, 딸기)과 색상(빨강, 노랑, 초록)이라는 물건들이 있다면, 이들을 짝지어 `(사과, 빨강)`, `(바나나, 노랑)`, `(딸기, 초록)` 같은 새로운 물건들을 만들 수 있습니다.
+- **합성**: 관계들을 이어붙이는 것입니다. 예를 들어 `서울 → 대구` 도로와 `대구 → 부산` 도로가 있다면, 이 둘을 이어서 `서울 → 부산` 도로를 만들 수 있습니다.
+- **투영**: 짝에서 하나만 골라내는 것입니다. 예를 들어 `(사과, 빨강)`이라는 짝에서 `사과`만 골라내거나 `빨강`만 골라내는 것을 말합니다.
+
+근데 범주론이 이렇게 간단하게 설명할 수 있을 정도로 만만한 학문은 아닌 것 같아서, 이 글에서는 느낌만... 보고 가는 걸로 하겠습니다.  
+
+자료를 조사하면서 찾았는데, [문동욱님의 블로그에 범주론 관련 시리즈](https://evan-moon.github.io/2024/02/27/category-theory-for-programmers-5-products-and-coproducts/)가 있으니 한 번 읽어보셔도 좋을 것 같습니다. 상당히 어렵더라구요. 물론 저는 읽다가 정신이 혼미해져서 일단 후퇴했습니다 🫠
+
+자, 이제 이 개념들을 프로그래밍에 어떻게 적용할 수 있을지 알아볼게요.
+
+---
+
+# 렌즈란?
+
+렌즈는 **복잡한 구조 속에서 특정 부분에 초점을 맞추는 도구**입니다. 카메라 렌즈라고 생각하면 됩니다. 우리는 카메라 렌즈로 찍고 싶은 부분에 초점을 맞추비낟. 프로그래밍에서의 렌즈도 이와 비슷하다고 할 수 있어요.
+
+렌즈는 함수형 프로그래밍에서 발전한 개념으로, 복잡한 데이터 구조의 조회와 갱신을 추상화하는 도구입니다. 이 개념은 Haskell 커뮤니티, 특히 [Edward Kmett](https://github.com/ekmett)가 개발한 [lens 라이브러리](https://github.com/ekmett/lens)에서 대중화되었다고 해요.
+
+렌즈의 기능은 크게 두 가지입니다.
+
+- 큰 데이터에서 작은 부분 가져오기 (get)
+- 작은 부분을 수정한 새로운 큰 데이터 만들기 (set)
+
+아래와 같은 학생 정보 객체가 있다고 생각해볼게요.
+
+```
+학생 = {
+  이름: "짱구",
+  성적: {
+    수학: 90,
+    영어: 85
+  }
+}
+```
+
+범주론적으로 이 학생 정보는 `이름`과 `성적`의 **곱**으로 볼 수 있습니다. 그리고 `성적`은 `수학`과 `영어`의 **곱**이죠.
+
+렌즈는 이런 곱 구조에서 특정 부분에 초점을 맞출 수 있어요. 예를 들어, `학생.성적.수학` 렌즈는 범주론의 **투영** 개념처럼 전체 데이터에서 특정 부분(수학 점수)만 선택합니다.
+
+```
+get(학생.성적.수학) → 90
+```
+
+또한 렌즈는 값을 변경할 때도 원본 데이터를 직접 수정하지 않고, 새 데이터를 만들어 반환합니다.
+
+```
+set(학생.성적.수학, 100) → {
+  이름: "짱구",
+  성적: {
+    수학: 100,
+    영어: 85
+  }
+}
+```
+
+---
+
+# lens.ts
+
+lens.ts는 렌즈 개념을 TypeScript로 구현한 라이브러리입니다. 이 라이브러리를 사용하면 앞서 본 복잡한 객체 수정 문제를 아주 간단하게 해결할 수 있어요. 라이브러리의 README 예제를 약간만 재구성해서 알아보겠습니다.
+
+## lens.ts 예시
+
+```tsx
+import { lens } from "lens.ts";
+
+type Person = {
+  name: string;
+  age: number;
+  accounts: Array<Account>;
+};
+
+type Account = {
+  type: string;
+  nickname: string;
+};
+
+const 짱구: Person = {
+  name: "신짱구",
+  age: 7,
+  accounts: [
+    {
+      type: "twitter",
+      nickname: "@신짱구",
+    },
+    {
+      type: "facebook",
+      nickname: "신짱구",
+    },
+  ],
+};
+```
+
+### 렌즈 생성하기
+
+위에서 렌즈란 **특정 부분에 초점을 맞추는 것**이라고 했는데, 이 특정 부분을 결정하는 건 객체의 key 값입니다. 렌즈를 생성하는 방법은 여러 가지가 있습니다.
+
+#### k 메서드로 렌즈 생성
+
+```tsx
+// Person 타입에 대한 렌즈 생성
+const personLens = lens<Person>();
+
+personLens.k("name"); // Lens<Person, string> 타입
+personLens.k("accounts"); // Lens<Person, Array<Account>> 타입
+personLens.k("hoge"); // 타입 에러! 'hoge'는 Person의 키가 아님
+
+personLens.k("accounts").k(1); // Lens<Person, Account> 타입
+personLens.k(1); // 타입 에러! 배열 타입이 아닌 경우 인덱스 사용 불가
+```
+
+#### 속성 프록시 사용하기
+
+더 간편하게 점 표기법으로 렌즈를 생성할 수 있습니다.
+
+```tsx
+personLens.name; // Lens<Person, string> 타입
+personLens.accounts; // Lens<Person, Array<Account>> 타입
+personLens.accounts[1]; // Lens<Person, Account> 타입
+personLens.hoge; // 타입 에러! 'hoge'는 Person의 속성이 아님
+```
+
+### get과 set 메서드 사용하기
+
+렌즈를 만들었으니 이제 렌즈를 사용해볼게요. get과 set 메서드를 사용하는 예시를 살펴보겠습니다.
+
+```tsx
+// get 메서드로 값 가져오기
+personLens.accounts[0].nickname.get()(짱구); // '@신짱구' 반환
+
+// set 메서드로 값 변경하기
+personLens.accounts[0].nickname.set("@신노스케")(짱구); // nickname이 '@신노스케'로 변경된 새 객체 반환
+
+// 함수를 전달하여 현재 값을 기반으로 변경하기
+personLens.age.set((x) => x + 1)(짱구); // age가 8로 변경된 새 객체 반환
+```
+
+### 렌즈 합성하기
+
+그리고 여러 렌즈를 합성하여 새로운 렌즈를 만들 수도 있습니다.
+
+```tsx
+// 개별 렌즈 생성
+const fstAccountLens = lens<Person>().accounts[0]; // Lens<Person, Account> 타입
+const nicknameLens = lens<Account>().nickname; // Lens<Account, string> 타입
+
+// 렌즈 합성
+const fstAccountnicknameLens = fstAccountLens.compose(nicknameLens); // Lens<Person, string> 타입
+
+// getter, setter 메서드 합성
+fstAccountLens.get(nicknameLens.get())(짱구); // '@신짱구' 반환
+fstAccountLens.set(nicknameLens.set("@신노스케"))(짱구); // nickname이 '@신노스케'로 변경된 새 객체 반환
+```
+
+이처럼 lens.ts는 복잡한 객체 구조에서 특정 부분에 접근하고 수정하는 작업을 간결하고 type-safe하게 만들어줍니다. 특히 중첩된 객체나 배열을 다룰 때 스프레드 연산자보다 실수 가능성을 줄여주고, 더욱 선언적인 코드를 작성할 수 있죠.
+
+---
+
+# 렌즈의 실용적 활용
+
+## 중첩된 데이터 구조 다루기
+
+렌즈는 특히 깊은 객체 계층을 가진 상태 관리에서 유용합니다.
+
+```tsx
+interface 교육기관 {
+  이름: string;
+  위치: {
+    시: string;
+    구: string;
+    상세주소: string;
+  };
+  부서들: {
+    [부서명: string]: {
+      책임자: {
+        이름: string;
+        연락처: string;
+      };
+      직원수: number;
+      상세정보: {
+        설립일: string;
+        예산: number;
+      };
+    };
+  };
+}
+
+// 교육공학부의 예산을 10% 증가시키기
+const 예산렌즈 = lens<교육기관>().부서들["교육공학부"].상세정보.예산;
+const 예산증액 = (기관: 교육기관) =>
+  예산렌즈.set((현재예산) => 현재예산 * 1.1)(기관);
+
+// 모든 부서의 책임자 이름을 가져오기
+const 모든책임자이름 = (기관: 교육기관) => {
+  return Object.keys(기관.부서들).map((부서명) => {
+    const 책임자이름렌즈 = lens<교육기관>().부서들[부서명].책임자.이름;
+    return 책임자이름렌즈.get()(기관);
+  });
+};
+```
+
+힘들게 변경할 부분을 찾아가서 변경하는 것보다 훨씬 선언적이고 읽기 쉬운 코드가 되었죠?
+
+## 렌즈와 함수형 프로그래밍 결합하기
+
+렌즈는 다른 함수형 프로그래밍 패턴과 결합하면 더 효율적으로 쓸 수 있어요. 예를 들어, 배열의 모든 요소에 변환을 적용하는 경우를 볼게요.
+
+```tsx
+interface 학생 {
+  이름: string;
+  점수: { [과목: string]: number };
+}
+
+const 학생들 = [
+  { 이름: "김철수", 점수: { 수학: 85, 영어: 90 } },
+  { 이름: "이영희", 점수: { 수학: 95, 영어: 92 } },
+];
+
+// 모든 학생의 수학 점수를 5점 올리기
+const 수학점수향상 = (학생목록: 학생[]) => {
+  return 학생목록.map((학생) => {
+    const 수학점수렌즈 = lens<학생>().점수["수학"];
+    return 수학점수렌즈.set((현재점수) => 현재점수 + 5)(학생);
+  });
+};
+
+// 결과: [
+//   { 이름: "김철수", 점수: { 수학: 90, 영어: 90 } },
+//   { 이름: "이영희", 점수: { 수학: 100, 영어: 92 } }
+// ]
+```
+
+이렇게 `map`, `filter`, `reduce` 같은 함수형 배열 메서드와 렌즈를 결합하면 데이터 변환 파이프라인을 효율적으로 구축할 수 있어요.
+
+## 폼 상태 관리
+
+복잡한 중첩 구조를 가진 폼을 다룰 때 고민이 많은데요, 뭘 어떻게 해도 깔~끔해 보이는 코드가 나오기는 어렵다고 생각했습니다. 근데 렌즈를 사용하면 훨씬 깔끔한 코드를 작성할 수 있겠더라구요.
+
+```tsx
+interface 회원가입폼 {
+  기본정보: {
+    이름: string;
+    이메일: string;
+    비밀번호: string;
+  };
+  추가정보: {
+    주소: {
+      우편번호: string;
+      기본주소: string;
+      상세주소: string;
+    };
+    연락처: string;
+    관심분야: string[];
+  };
+  마케팅동의: boolean;
+}
+
+// 컴포넌트 내부
+const 회원가입폼 = () => {
+  const [formState, setFormState] = useState<회원가입폼>({
+    기본정보: { 이름: "", 이메일: "", 비밀번호: "" },
+    추가정보: {
+      주소: { 우편번호: "", 기본주소: "", 상세주소: "" },
+      연락처: "",
+      관심분야: [],
+    },
+    마케팅동의: false,
+  });
+
+  const 필드업데이트 = (렌즈, 값) => {
+    setFormState(렌즈.set(값)(formState));
+  };
+
+  return (
+    <form>
+      <input
+        value={lens<회원가입폼>().기본정보.이름.get()(formState)}
+        onChange={(e) =>
+          필드업데이트(lens<회원가입폼>().기본정보.이름, e.target.value)
+        }
+      />
+
+      <input
+        type="checkbox"
+        checked={lens<회원가입폼>().마케팅동의.get()(formState)}
+        onChange={(e) =>
+          필드업데이트(lens<회원가입폼>().마케팅동의, e.target.checked)
+        }
+      />
+    </form>
+  );
+};
+```
+
+근데, 사실 react-hook-form으로 폼 상태를 관리하고 있다면 lens.ts대신 [react-hook-form/lenses](https://github.com/react-hook-form/lenses)를 사용하는 것이 더 좋을 것 같습니다.
+
+최근에 정말 복잡한 폼을 관리할 일이 있었는데요, `register`에다 특정 필드를 등록하기 위해 굉장히 복잡한 코드를 짜야 했어요. `map`으로 순회하면서 input을 렌더링하고, 거기에 `register`를 적용하는 방식이 가독성을 굉장히 해치더라구요.
+
+하지만 react-hook-form/lenses를 사용하면 이렇게 복잡한 코드를 짤 필요가 없고, 렌즈 자체를 의존성으로 주입하여 사용할 수 있으니 훨씬 깔끔한 코드가 될 것 같아요. 관심 있으신 분들은 해당 라이브러리를 살펴보시면 좋겠습니다.
+
+---
+
+# 결론
+
+렌즈는 수학적 개념인 범주론에서 영감을 받았지만, 사용하기 위해서 어려운 개념을 완전히 마스터할 필요는 없다고 생각합니다. 물론 알고 쓰면 더 좋겠지만, 렌즈를 사용하는 것 자체가 이해를 요구하는 것은 아니니까요.
+
+렌즈의 장점은 이렇게 정리할 수 있을 것 같아요.
+
+- **선언적 프로그래밍**: 렌즈를 사용하면 "무엇을" 할 것인지 명확하게 표현할 수 있습니다.
+
+  ```tsx
+  // "대학 전공을 컴퓨터공학과로 바꾼다"라는 의도가 명확히 드러남
+  lens<Student>().education.university.major.set("컴퓨터공학과")(student);
+  ```
+
+- **불변성 보장**: 렌즈는 항상 원본 데이터를 변경하지 않고 새 데이터를 만듭니다.
+
+- **타입 안전성**: TypeScript와 결합하여 컴파일 시점에 오류를 잡아냅니다.
+
+- **재사용성**: 렌즈를 한 번 정의하면 여러 곳에서 재사용할 수 있습니다.
+
+  ```tsx
+  const universityMajorLens = lens<Student>().education.university.major;
+
+  // 여러 곳에서 재사용
+  const student1 = universityMajorLens.set("컴퓨터공학과")(student);
+  const student2 = universityMajorLens.set("물리학과")(anotherStudent);
+  ```
+
+- **복잡성 감소**: 중첩된 객체를 다룰 때 코드의 복잡성을 크게 줄여줍니다. 복잡한 상태(useState)를 업데이트할 때 굉장히 편하겠죠.
+
+어쨌든, 렌즈를 사용하면 복잡한 객체를 편하게 다룰 수 있으니 한 번 사용해 보는 것을 추천합니다.
+
+---
+
+# 부록: lens.ts 코드 까보기
+
+lens.ts의 코드를 까보면서 동작 원리를 살펴볼게요.
+
+## k 함수
+
+```tsx
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L11-L20
+  public k<K extends keyof U>(key: K): Lens<T, U[K]> {
+    return this.compose(lens(
+      t => t[key],
+      v => t => {
+        const copied = copy(t);
+        copied[key] = v;
+        return copied;
+      }
+    ));
+  }
+```
+
+`k` 메서드는 객체의 특정 속성에 접근하는 렌즈를 생성하는 핵심 기능을 담당합니다. 이 메서드는 현재 렌즈에서 더 깊은 수준으로 들어가는 새로운 렌즈를 반환합니다. 작동 방식을 상세히 살펴보겠습니다:
+
+1. **새로운 렌즈 생성**:
+
+   ```tsx
+   lens(
+     (t) => t[key],
+     (v) => (t) => {
+       const copied = copy(t);
+       copied[key] = v;
+       return copied;
+     }
+   );
+   ```
+
+   - **getter 함수**: `t => t[key]`
+
+     - 이 단순한 함수는 객체 `t`에서 특정 `key`에 해당하는 값을 추출합니다.
+     - 예: `user` 객체에서 `name` 속성 값을 가져옵니다.
+
+   - **setter 함수**: `v => t => { ... }`
+     - 이중 중첩된 함수 구조(커링)를 사용합니다:
+       1. 외부 함수: 새 값 `v`를 인자로 받습니다.
+       2. 내부 함수: 대상 객체 `t`를 인자로 받아 변환된 새 객체를 반환합니다.
+     - 불변성을 유지하기 위해 다음 단계를 수행합니다:
+       1. 원본 객체의 얕은 복사본을 생성 (`copy(t)`)
+       2. 복사본에서 지정된 키의 값만 업데이트 (`copied[key] = v`)
+       3. 변경된 새 객체 반환 (`return copied`)
+
+2. **렌즈 합성**: `this.compose(...)`
+   - 현재 렌즈와 새로 생성한 렌즈를 합성하여 연결된 접근 경로를 형성합니다.
+   - 이를 통해 `lens().a.b.c`와 같은 체인 형태로 중첩된 객체 속성에 접근할 수 있습니다.
+
+`k` 메서드에 사용된 `K extends keyof U` 덕분에 타입 안전성을 보장받으며 사용할 수 있어요. "U 타입의 실제 존재하는 키만 사용할 수 있다"라는 제약으로, 존재하지 않는 속성에 접근하려는 시도는 컴파일 단계에서 오류를 발생시켜요.
+
+## proxify 함수: 자바스크립트 Proxy 객체
+
+JavaScript의 Proxy는 객체에 대한 가상 레이어를 제공하여, 그 객체와의 모든 상호작용을 중간에서 가로채고 사용자 정의 동작을 수행할 수 있게 합니다.
+
+```jsx
+const 원본객체 = { 이름: "신짱구" };
+const 프록시 = new Proxy(원본객체, {
+  get(대상, 프로퍼티) {
+    console.log(`${프로퍼티} 접근 감지!`);
+    return 대상[프로퍼티];
+  },
+});
+
+프록시.이름; // "이름 접근 감지!" 출력 후 "신짱구" 반환
+```
+
+Proxy는 객체 조작을 가로채는 **트랩(trap)** 이라는 핸들러 메서드를 제공해요. 트랩이 설정되어 있으면, JavaScript 엔진은 기본 동작 대신 그 트랩을 호출합니다. 그러니까, lens.ts는 점 표기법으로 접근할 때마다 트랩이 이를 가로채고 새로운 렌즈를 생성해 반환하고 있는 것이에요.
+
+```tsx
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L67-L76
+function proxify<T, U>(impl: LensImpl<T, U>): Lens<T, U> {
+  return new Proxy(impl, {
+    get(target, prop) {
+      if (typeof (target as any)[prop] !== "undefined") {
+        return (target as any)[prop];
+      }
+      return target.k(prop as any);
+    },
+  }) as any;
+}
+```
+
+렌즈 객체에 `.name`과 같이 속성에 접근하면  
+➡️ Proxy가 이 접근을 가로채서  
+➡️ 그 속성이 실제 렌즈 메서드가 아니라면?  
+➡️ 새로운 렌즈를 생성해 반환합니다  
+
+이렇게 해서 `lens().a.b.c` 처럼 체이닝 방식으로 렌즈를 생성할 수 있게 되는 것입니다.
+
+## Lens 타입
+
+lens.ts는 요런 타입에서 출발합니다.
+
+```tsx
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L1
+export type Lens<T, U> = LensImpl<T, U> & LensProxy<T, U>;
+```
+
+- `T`는 전체 데이터 구조의 타입 (e.g. Student 객체)
+- `U`는 렌즈가 초점을 맞추는 부분의 타입 (e.g. string, number 등)
+
+## get과 set 함수
+
+- **get 메서드**: 큰 데이터(`T`)에서 작은 부분(`U`)을 가져옵니다. 범주론의 **투영**처럼 전체에서 부분을 가져오는 역할입니다.
+- **set 메서드**: 작은 부분(`U`)의 새 값을 받아 새로운 큰 데이터(`T`)를 만듭니다. 부분을 변경하여 새로운 전체를 만들되, 원본은 변경하지 않습니다.
+
+두 메서드 모두 함수형 프로그래밍의 대표적인 패턴이라고 할 수 있는 함수 오버로딩과 고차 함수를 사용하고 있어요.
+
+### get 함수
+
+```ts
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L29-L38
+  public get(): Getter<T, U>;
+  public get<V>(f: Getter<U, V>): Getter<T, V>;
+  public get() {
+    if (arguments.length) {
+      const f = arguments[0];
+      return (t: T) => f(this._get(t));
+    } else {
+      return this._get;
+    }
+  }
+```
+
+함수 오버로딩으로 두 가지 형태의 get 메서드를 제공합니다.
+
+- **기본 형태**: `렌즈.get()`
+  - 반환 값: `Getter<T, U>` 타입의 함수
+  - 이 함수는 T 타입 객체를 받아 U 타입 값을 반환
+
+```tsx
+const getName = userLens.name.get();
+const name = getName(user);
+```
+
+- **함수를 전달하여 변환**: `렌즈.get(fn)`
+  - 매개변수 `fn`: U 타입 값을 받아 V 타입 값을 반환하는 함수
+  - 반환 값: `Getter<T, V>` 타입의 함수
+  - 이 함수는 T 타입 객체를 받아 V 타입 값을 반환
+
+```tsx
+const getUpperName = userLens.name.get((name) => name.toUpperCase());
+const upperName = getUpperName(user);
+```
+
+### set 함수
+
+```ts
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L40-L49
+  public set(value: U): Setter<T>;
+  public set(f: Setter<U>): Setter<T>;
+  public set(modifier: U | Setter<U>) {
+    if (typeof modifier === 'function') {
+      return (t: T) => this._set(modifier(this._get(t)))(t);
+    } else {
+      return this._set(modifier);
+    }
+  }
+```
+
+set도 마찬가지로 함수 오버로딩으로 두 가지 형태를 제공합니다.
+
+- **기본 형태**: `렌즈.set(value)`
+  - 매개변수 `value`: 설정할 U 타입 값
+  - 반환 값: `Setter<T>` 타입의 함수
+  - 이 함수는 T 타입 객체를 받아 업데이트된 T 타입 객체를 반환
+
+```tsx
+const updateUser = userLens.name.set("새이름");
+const newUser = updateUser(user);
+```
+
+- **함수를 전달하여 변환**: `렌즈.set(f)`
+  - 매개변수 `f`: U 타입 값을 받아 U 타입 값을 반환하는 함수
+  - 반환 값: `Setter<T>` 타입의 함수
+  - 이 함수는 현재 값을 가져와 변환 함수를 적용한 후 결과로 설정
+
+```tsx
+const incrementAge = userLens.age.set((age) => age + 1);
+const olderUser = incrementAge(user);
+```
+
+변환 함수를 인자로 사용하는 고차함수 형태는 흔히 사용하는 배열 메서드(`map`이나 `filter` 등...)와 닮은 것 같아요. 이런 형태의 함수를 사용하면 현재 값에 기반한 업데이트를 가능하게 합니다. 뭐 이름 뒤에 '~핑'을 붙인다던지...
+
+## compose 함수
+
+렌즈의 또다른 특성은 **합성**입니다. 위쪽에서 잠깐 언급했던 범주론의 핵심 개념인 합성을 렌즈에 적용한 것입니다.
+
+```tsx
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L22-L27
+public compose<V>(other: Lens<U, V>): Lens<T, V> {
+  return lens(
+    t => other._get(this._get(t)),
+    v => t => this._set(other._set(v)(this._get(t)))(t)
+  );
+}
+```
+
+`compose`는 두 렌즈를 합성하여 새 렌즈를 만드는 역할을 합니다.
+
+- 첫 번째 렌즈: `T → U` (큰 객체에서 중간 부분으로)
+- 두 번째 렌즈: `U → V` (중간 부분에서 최종 부분으로)
+- 합성된 렌즈: `T → V` (큰 객체에서 최종 부분으로)
+
+이것이 `lens().a.b.c` 같은 체인이 작동하는 원리입니다. 각 점(`.`) 접근마다 새 렌즈가 만들어지고, 이전 렌즈와 합성됩니다.
+
+## copy 함수
+
+```tsx
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L54-L65
+function copy<T>(x: T): T {
+  if (Array.isArray(x)) {
+    return x.slice() as any;
+  } else if (x && typeof x === "object") {
+    return Object.keys(x).reduce<any>((res, k) => {
+      res[k] = (x as any)[k];
+      return res;
+    }, {});
+  } else {
+    return x;
+  }
+}
+```
+
+`copy` 함수는 lens.ts에서 불변성을 보장하는 핵심 로직이에요. 렌즈는 원본 데이터를 변경하지 않고 새 객체를 생성해야 하는데, 이 함수가 그 역할을 담당합니다.
+
+함수는 입력값의 타입에 따라 세 가지 케이스로 나눠서 처리하게 됩니다.
+
+- **배열인 경우**:
+
+  ```tsx
+  if (Array.isArray(x)) {
+    return x.slice() as any;
+  }
+  ```
+
+  배열이면 `slice()` 메서드로 복사해요. 새 배열은 독립적인 참조를 갖지만, 내부 요소들은 원본과 같은 참조를 공유합니다.
+
+- **객체인 경우**:
+
+  ```tsx
+  else if (x && typeof x === 'object') {
+    return Object.keys(x).reduce<any>((res, k) => {
+      res[k] = (x as any)[k];
+      return res;
+    }, {});
+  }
+  ```
+
+  객체라면 새 객체를 생성하고 모든 속성을 복사합니다. `Object.keys(x)`로 모든 키를 가져와서 `reduce`로 빈 객체에 속성들을 채워넣어요.
+
+  이것도 얕은 복사라서 중첩된 객체들은 원본과 같은 참조를 유지합니다.
+
+- **원시값인 경우**:
+
+  ```tsx
+  else {
+    return x;
+  }
+  ```
+
+  숫자, 문자열, 불리언, undefined, null 같은 원시값은 그대로 반환합니다. 원시값은 본질적으로 불변(immutable)이라 별도 복사가 필요 없습니다.
+
+이렇게 얕은 복사를 사용하는 방식은 성능도 고려하고, 불변성도 지키기 위한 방식으로 보입니다. 모든 것을 깊은 복사하면 비효율적이고, 아예 복사하지 않으면 불변성이 깨지죠.
+
+따라서 렌즈는 변경이 필요한 경로의 객체만 새로 생성하고 나머지는 기존 참조를 재활용합니다. 이렇게 하면 메모리 사용을 최적화하면서도 불변성을 지켜 상태 관리를 예측 가능하게 만들 수 있어요.
+
+예를 들어, 다음과 같은 짱구와 친구들 객체가 있다고 가정해 볼게요.
+
+```tsx
+const student = {
+  name: "신짱구",
+  age: 10,
+  education: {
+    elementary: "떡잎초등학교",
+    high: {
+      name: "떡잎고등학교",
+      major: "문과",
+    },
+  },
+  friends: ["철수", "맹구", "유리", "훈이"],
+};
+```
+
+고등학교 전공을 "이과"로 바꾸는 렌즈 연산을 수행하면 이런 과정이 발생해요.
+
+```tsx
+const updatedStudent =
+  lens<Student>().education.high.major.set("이과")(student);
+```
+
+1. `student` 객체를 얕은 복사합니다 (`name`, `age`, `education`, `friends` 속성 복사)
+2. `education` 객체를 얕은 복사합니다 (`elementary`, `high` 속성 복사)
+3. `high` 객체를 얕은 복사합니다 (`name`, `major` 속성 복사)
+4. 복사된 `high` 객체의 `major` 속성을 "이과"로 변경합니다
+
+결과적으로 변경된 경로(`student → education → high → major`)에 있는 객체들만 새로 생성되고, 변경되지 않은 속성들은 값만 복사됩니다.
+
+## 진입점 lens 함수
+
+```tsx
+// https://github.com/hatashiro/lens.ts/blob/master/src/index.ts#L78-L86
+export function lens<T>(): Lens<T, T>;
+export function lens<T, U>(
+  _get: Getter<T, U>,
+  _set: (value: U) => Setter<T>
+): Lens<T, U>;
+export function lens() {
+  if (arguments.length) {
+    return proxify(new LensImpl(arguments[0], arguments[1]));
+  } else {
+    return lens(
+      (t) => t,
+      (v) => (_) => v
+    );
+  }
+}
+```
+
+`lens` 함수는 라이브러리의 진입점으로, 두 가지 방식으로 호출할 수 있어요.
+
+- **타입 매개변수만 있는 경우**: `lens<T>()`
+  - 렌즈를 생성
+  - getter: `t => t` - 객체 자체를 반환
+  - setter: `v => _ => v` - 원래 객체에 관계없이 새 값을 반환
+
+```ts
+lens<User>().name.firstName;
+```
+
+- **getter와 setter를 제공하는 경우**: `lens(_get, _set)`
+  - 사용자 정의 렌즈를 생성
+  - 사용자가 직접 getter와 setter 로직을 정의할 수 있음
+  - 복잡한 변환이나 특별한 로직이 필요할 때 사용함
+
+```ts
+lens(
+  (user) => user.contacts[0],
+  (newContact) => (user) => ({
+    ...user,
+    contacts: [newContact, ...user.contacts.slice(1)],
+  })
+);
+```
+
+if문을 보면 매개변수의 존재 여부에 따라 다른 동작이 작성되어 있네요.
+
+```tsx
+if (arguments.length) {
+  return proxify(new LensImpl(arguments[0], arguments[1]));
+} else {
+  return lens(
+    (t) => t,
+    (v) => (_) => v
+  );
+}
+```
+
+두 경우 모두 결과를 `proxify` 함수로 감싸 점 표기법 접근이 가능하도록 만들어져 있습니다.  
+
+---
+
+이렇게 lens.ts 라이브러리의 코드를 살펴보았습니다. 자바스크립트의 Proxy를 활용하는 방식을 처음 접해서 신기했네요.  
+
+Proxy 동작도 조금 궁금했는데, 살짝 조사해보니 일반 JavaScript 코드로는 구현할 수 없는 저수준 기능이라고 하는군요... 더 알아보지는 않았습니다🫠  
+
+개인적으로는 함수형 프로그래밍과 범주론 등에 대해 공부해보고 싶다는 생각이 들었네요. 아직 잘 모르는 내용이 대부분이라 학습의 필요성을 많이 느꼈습니다.  
+
+나중에 시간이 나면 봐야겠다고 생각한 유튜브를 하나 남기며 이만 마치겠습니다.  
+<iframe style={{ aspectRatio: '16/9', width: '100%' }} src="https://www.youtube.com/embed/ho7oagHeqNc?si=iwPvPQqZCe7CtLMC" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
