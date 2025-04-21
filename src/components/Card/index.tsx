@@ -13,9 +13,18 @@ export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, "title">
   thumbnail?: string;
   category: string;
   date: string;
+  priority?: boolean;
 }
 
-const Card = ({ className, title, description, thumbnail, category, date }: CardProps) => {
+const Card = ({
+  className,
+  title,
+  description,
+  thumbnail,
+  category,
+  date,
+  priority,
+}: CardProps) => {
   return (
     <div
       className={cn(
@@ -32,7 +41,7 @@ const Card = ({ className, title, description, thumbnail, category, date }: Card
           alt={title}
           src={thumbnail}
           fill
-          priority
+          priority={priority}
           sizes="(max-width: 640px) 100vw, 380px"
           className="object-cover group-hover:scale-110 duration-300 transition-transform"
           placeholder="blur"

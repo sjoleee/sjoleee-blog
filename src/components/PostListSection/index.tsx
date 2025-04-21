@@ -21,7 +21,7 @@ const PostListSection = ({ category }: { category?: string }) => {
         <div className="flex flex-col gap-8 w-full h-fit">
           {sortDatesDescending(allPosts)
             .filter((post) => post.category === category || !category)
-            .map((post) => (
+            .map((post, index) => (
               <Link key={post._id} href={post.slug}>
                 <Card
                   title={post.title}
@@ -29,6 +29,7 @@ const PostListSection = ({ category }: { category?: string }) => {
                   thumbnail={post.thumbnail}
                   category={post.category}
                   date={post.date}
+                  priority={index < 3}
                 />
               </Link>
             ))}
