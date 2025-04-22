@@ -41,6 +41,7 @@ const Card = ({
           alt={title}
           src={thumbnail}
           fill
+          loading={priority ? "eager" : "lazy"}
           priority={priority}
           sizes="(max-width: 640px) 100vw, 380px"
           className="object-cover group-hover:scale-110 duration-300 transition-transform"
