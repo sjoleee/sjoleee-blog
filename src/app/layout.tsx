@@ -5,6 +5,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { USER_INFORMATIONS } from "@/constants/data";
 import { Analytics } from "@vercel/analytics/next";
+import cn from "@/utils/cn";
 
 export const metadata: Metadata = {
   metadataBase: new URL(USER_INFORMATIONS.domain),
@@ -26,13 +27,23 @@ const pretendard = localFont({
   variable: "--font-pretendard",
 });
 
+const tossface = localFont({
+  src: "../../public/fonts/TossFace.otf",
+  display: "swap",
+  variable: "--font-tossface",
+});
+
 const RootLayout = ({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) => {
   return (
-    <html lang="ko" className={`${pretendard.variable} bg-backgroundHeavy`} data-theme="light">
+    <html
+      lang="ko"
+      className={cn(pretendard.variable, tossface.variable, "bg-backgroundHeavy")}
+      data-theme="light"
+    >
       <FramerLazyMotion>
         <ThemeProvider>
           <body className="relative antialiased">

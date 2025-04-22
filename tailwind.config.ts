@@ -12,7 +12,13 @@ const config: Config = {
     screens: { tablet: "640px", desktop: "1024px" },
     extend: {
       fontFamily: {
-        sans: ["var(--font-pretendard)", "tossFace"],
+        sans: [
+          "var(--font-pretendard)",
+          "var(--font-tossface)",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+        ],
       },
       colors: {
         backgroundHeavy: "rgb(var(--color-background-heavy))",
